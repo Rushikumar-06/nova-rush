@@ -5,9 +5,10 @@ const Pickups = (() => {
   const P = CONFIG.pickups, TAU = Math.PI * 2
   const COLOR = { rapid: COLORS.rapid, spread: COLORS.spread, shield: COLORS.shield, bomb: COLORS.accent }
 
-  function pick() {
-    let roll = Math.random() * Object.values(P.weights).reduce((a, b) => a + b, 0)
-    for (const k in P.weights) if ((roll -= P.weights[k]) <= 0) return k
+  function pick(scene) {
+    const w = { ...P.weights, bomb: P.weights.bomb * P.bombFade ** (scene.sector - 1) }
+    let roll = Math.random() * Object.values(w).reduce((a, b) => a + b, 0)
+    for (const k in w) if ((roll -= w[k]) <= 0) return k
     return 'rapid'
   }
 
@@ -25,7 +26,7 @@ const Pickups = (() => {
     },
 
     // force: mothership drops ignore the on-screen cap
-    drop(scene, x, y, type = pick(), force = false) {
+    drop(scene, x, y, type = pick(scene), force = false) {
       if (!force && scene.pickups.length >= P.max) return null
       const { w, h } = CONFIG.arena, r = P.radius + 8
       const o = scene.add.image(Phaser.Math.Clamp(x, r, w - r), Phaser.Math.Clamp(y, r, h - r), 'pu_' + type).setDepth(12)

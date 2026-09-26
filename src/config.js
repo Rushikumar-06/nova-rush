@@ -31,7 +31,8 @@ const CONFIG = {
   score: {
     streakPerMult: 25,    // multiplier = 1 + floor(streak / 25)
     maxMult: 10,
-    extraEvery: 175000,   // +1 life and +1 bomb per this many points
+    extraEvery: 175000,   // +1 life and +1 bomb per this many points ...
+    extraGrowth: 0.5,     // ... and the gap to the next one grows by this x extraEvery per sector past the first
   },
 
   spawn: {
@@ -41,6 +42,8 @@ const CONFIG = {
     groupStart: 1,        // enemies per group at t=0
     groupEnd: 5,          // enemies per group at t=rampSeconds
     speedRamp: 0.25,      // enemy speed multiplier grows 1 -> 1.25 over rampSeconds
+    sectorRate: 0.15,     // per sector past the first: spawns come this much more often, swarms this much bigger
+    sectorSpeed: 0.06,    // per sector past the first: enemies this much faster
     minPlayerDist: 250,
     telegraph: 0.6,       // s of harmless fade-in before an enemy acts
     maxEnemies: 150,
@@ -103,6 +106,7 @@ const CONFIG = {
     radius: 16,
     duration: 10,         // s rapid fire / spread shot last
     weights: { rapid: 3, spread: 3, shield: 2.5, bomb: 0.75 },
+    bombFade: 0.75,       // bomb weight x this per sector past the first (bombs get rarer)
   },
 
   fx: {

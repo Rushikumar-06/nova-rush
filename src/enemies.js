@@ -11,6 +11,7 @@ const Enemies = (() => {
   const rand = (a, b) => a + Math.random() * (b - a)
   const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v)
   const ramp = (t) => Math.min(1, t / S.rampSeconds) // 0..1 difficulty
+  const past = (scene) => scene.sector - 1            // sectors cleared: pressure keeps rising after the ramp tops out
   // The mothership's bullet attacks and hull tint for sectors 1..5; 5+ keeps the last (all attacks, faster).
   const ATTACKS = [[], ['ring'], ['spiral'], ['fan'], ['ring', 'spiral', 'fan']]
   const HUES = [0xffffff, 0xffa090, 0xffe09a, 0xffa0dc, 0xff8080]
@@ -53,7 +54,7 @@ const Enemies = (() => {
     const p = scene.player, r = E.chaser.radius + 40
     const corners = [[r, r], [A.w - r, r], [r, A.h - r], [A.w - r, A.h - r]]
       .filter(([x, y]) => Math.hypot(x - p.x, y - p.y) >= S.minPlayerDist + 60)
-    const n = Phaser.Math.Between(S.swarmMin, S.swarmMax)
+    const n = Math.round(Phaser.Math.Between(S.swarmMin, S.swarmMax) * (1 + S.sectorRate * past(scene)))
     for (let i = 0; i < n; i++) {
       const [x, y] = corners[i % corners.length]
       Enemies.spawn(scene, 'chaser', x + rand(-40, 40), y + rand(-40, 40), S.swarmTelegraph)
@@ -369,7 +370,7 @@ const Enemies = (() => {
       if (t >= d.nextSpawn) {
         const e = ramp(t)
         if (!calm && d.nextSwarm - t > S.swarmLull) spawnGroup(scene, e)
-        const interval = (S.startInterval + (S.endInterval - S.startInterval) * e) * (scene.boss ? S.bossSlow : 1)
+        const interval = (S.startInterval + (S.endInterval - S.startInterval) * e) * (scene.boss ? S.bossSlow : 1) / (1 + S.sectorRate * past(scene))
         d.nextSpawn = t + interval * (1 + S.breatheAmp * Math.sin(t * TAU / S.breathePeriod))
       }
 
@@ -398,7 +399,7 @@ const Enemies = (() => {
       e.radius = r
       e.points = c.points
       e.telegraph = telegraph
-      e.speed = c.speed * (1 + S.speedRamp * ramp(scene.elapsed)) * rand(0.92, 1.08)
+      e.speed = c.speed * (1 + S.speedRamp * ramp(scene.elapsed) + S.sectorSpeed * past(scene)) * rand(0.92, 1.08)
       const a = Math.atan2(A.h / 2 - e.y, A.w / 2 - e.x) + rand(-0.6, 0.6) // initial drift: into the arena
       e.vx = Math.cos(a) * e.speed
       e.vy = Math.sin(a) * e.speed

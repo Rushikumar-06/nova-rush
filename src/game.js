@@ -336,7 +336,7 @@ class GameScene extends Phaser.Scene {
     this.best = Math.max(this.best, this.score)
     if (points > 0) this.events.emit('kill', x, y, points, e.kind)
     while (this.score >= this.nextExtra) {   // award every threshold crossed
-      this.nextExtra += S.extraEvery
+      this.nextExtra += S.extraEvery * (1 + S.extraGrowth * (this.sector - 1))
       this.lives++
       this.bombs++
       SFX.play('extraLife')
