@@ -10,8 +10,8 @@ const CONFIG = {
     accel: 3200,          // px/s^2 toward input direction
     drag: 2600,           // px/s^2 when no input
     radius: 14,           // hitbox (the ship art is bigger)
-    lives: 2,
-    bombs: 2,
+    lives: 3,
+    bombs: 3,
     invulnSeconds: 2,
     deathBeat: 0.6,       // s (real time) of slow motion after a death, then respawn
     deathSlow: 0.35,      // time scale at the start of the death beat (eases back to 1)
@@ -31,7 +31,7 @@ const CONFIG = {
   score: {
     streakPerMult: 25,    // multiplier = 1 + floor(streak / 25)
     maxMult: 10,
-    extraEvery: 150000,   // +1 life and +1 bomb per this many points
+    extraEvery: 175000,   // +1 life and +1 bomb per this many points
   },
 
   spawn: {
