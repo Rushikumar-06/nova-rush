@@ -132,7 +132,7 @@ const SFX = (() => {
     toast() { tone('sine', 1175, 1175, 0.18, 0.07); tone('sine', 1568, 1568, 0.3, 0.06, 0.09) },
   }
 
-  window.addEventListener('pointerdown', unlock, true)
+  for (const ev of ['pointerdown', 'pointerup', 'touchend']) window.addEventListener(ev, unlock, true) // touch: only a release unlocks
   window.addEventListener('keydown', (e) => {
     unlock()
     if (e.code === 'KeyM' && !e.repeat) SFX.toggleMute()

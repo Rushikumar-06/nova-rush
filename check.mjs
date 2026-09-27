@@ -202,6 +202,39 @@ async function main() {
   await js(`(() => { window.__pad.connected = false; navigator.getGamepads = () => []; return true })()`)
   check(pad.moved > 50 && pad.shots > 2 && pad.cursor === 'none', `gamepad: stick moved ${Math.round(pad.moved)}px, right stick fired ${pad.shots}, RB bombed, cursor hidden`)
 
+  // Touch: a tap switches to the on-screen controls; left thumb moves, right thumb aims (up) + fires, DASH / BOMB / pause
+  // buttons work, a tap on RESUME closes the pause menu, and the mouse takes over again.
+  const touch = (type, touchPoints = []) => send('Input.dispatchTouchEvent', { type, touchPoints })
+  const btn = (b) => js(`(() => { const r = document.querySelector('[data-btn=${b}]').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()`)
+  const press = async ([x, y]) => { await touch('touchStart', [{ x, y }]); await sleep(60); await touch('touchEnd') }
+  await js(`(() => { const g = ${G}; g.player.invuln = 30; g.player.x = 800; g.player.y = 450; g.bombs = 2; g.dashCd = 0; return true })()`)
+  await press([800, 450])
+  await waitFor(`Pad.touch && document.getElementById('touch').classList.contains('on')`, 'a tap to show the touch controls', 2000)
+  const t0 = await js(`(() => { const g = ${G}; return { x: g.player.x, shots: g.stats.shots, dashes: g.stats.dashes, bombs: g.bombs } })()`)
+  await touch('touchStart', [{ x: 300, y: 650, id: 1 }])
+  await touch('touchStart', [{ x: 300, y: 650, id: 1 }, { x: 1300, y: 650, id: 2 }])
+  await touch('touchMove', [{ x: 200, y: 650, id: 1 }, { x: 1300, y: 550, id: 2 }])
+  await sleep(500)
+  const t1 = await js(`(() => { const g = ${G}; return { x: g.player.x, shots: g.stats.shots, rot: g.player.rotation } })()`)
+  await touch('touchEnd')
+  await sleep(100)
+  const idle = await js(`Pad.move.x === 0 && Pad.aim.x === 0 && Pad.aim.y === 0`)
+  check(t0.x - t1.x > 50 && t1.shots - t0.shots > 2 && Math.abs(t1.rot + Math.PI / 2) < 0.2 && idle,
+    `touch: left thumb moved ${Math.round(t0.x - t1.x)}px, right thumb aimed up and fired ${t1.shots - t0.shots}, both let go`)
+  await press(await btn('lb'))
+  await waitFor(`${G}.stats.dashes === ${t0.dashes + 1}`, 'the DASH button to dash', 2000)
+  await press(await btn('rb'))
+  await waitFor(`${G}.bombs === ${t0.bombs - 1}`, 'the BOMB button to bomb', 2000)
+  await press(await btn('start'))
+  await waitFor(`${G}.state === 'paused' && !document.getElementById('touch').classList.contains('on')`, 'the pause button to pause', 2000)
+  await sleep(300)
+  await press([800, 350]) // RESUME
+  await waitFor(`${G}.state === 'playing'`, 'a tap on RESUME', 2000)
+  await sleep(1100)
+  await mouse('mouseMoved', 800, 450, 0)
+  await waitFor(`!Pad.touch && !Pad.active && !document.getElementById('touch').classList.contains('on')`, 'the mouse to take over from touch', 2000)
+  check(true, 'touch buttons: DASH dashes, BOMB bombs, II pauses, RESUME tapped; the mouse takes over again')
+
   // Mothership: skip to the end of sector 1, it arrives; destroy it, pick an upgrade, and the ship warps to sector 2.
   await js(`(() => { const g = ${G}; g.player.invuln = 60; g.sectorStart = g.elapsed - CONFIG.sector.duration; return true })()`)
   await waitFor(`!!${G}.boss && ${G}.boss.telegraph <= 0`, 'the mothership to arrive', 8000)

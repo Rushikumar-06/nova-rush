@@ -399,7 +399,7 @@ const Enemies = (() => {
       e.radius = r
       e.points = c.points
       e.telegraph = telegraph
-      e.speed = c.speed * (1 + S.speedRamp * ramp(scene.elapsed) + S.sectorSpeed * past(scene)) * rand(0.92, 1.08)
+      e.speed = c.speed * rand(0.92, 1.08)
       const a = Math.atan2(A.h / 2 - e.y, A.w / 2 - e.x) + rand(-0.6, 0.6) // initial drift: into the arena
       e.vx = Math.cos(a) * e.speed
       e.vy = Math.sin(a) * e.speed

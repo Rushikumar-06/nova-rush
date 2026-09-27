@@ -69,6 +69,8 @@ const UI_TEXT = {
   tFire: uiTip('AIM WITH THE MOUSE  ·  HOLD LEFT CLICK TO FIRE'), tFirePad: uiTip('AIM AND FIRE WITH THE RIGHT STICK'),
   tDash: uiTip('PRESS  SHIFT  TO DASH THROUGH DANGER'), tDashPad: uiTip('PRESS  LB  TO DASH THROUGH DANGER'),
   tBomb: uiTip('SPACE  OR  RIGHT CLICK  BOMBS THE SWARM'), tBombPad: uiTip('PRESS  RB  TO BOMB THE SWARM'),
+  tMoveTouch: uiTip('DRAG ON THE LEFT SIDE TO MOVE'), tFireTouch: uiTip('DRAG ON THE RIGHT SIDE TO AIM AND FIRE'),
+  tDashTouch: uiTip('TAP  DASH  TO DASH THROUGH DANGER'), tBombTouch: uiTip('TAP  BOMB  TO BOMB THE SWARM'),
   paused: ['PAUSED', 110, '#e6fdff', { glow: UI_CYAN, blur: 28, spacing: 14, weight: '900' }],
   resume: uiItem('RESUME'), restart: uiItem('RESTART'), settings: uiItem('SETTINGS'), quit: uiItem('QUIT TO TITLE'),
   upgrades: uiCap('UPGRADES'), pauseKeys: uiHint('P / ESC  RESUME'), pausePad: uiHint('START / B  RESUME'),
@@ -171,6 +173,8 @@ function uiShowShip(scene, x, y, scale) {
 const UI_KEYS = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left',
   ArrowRight: 'right', KeyD: 'right', Enter: 'ok', NumpadEnter: 'ok', Space: 'ok', Escape: 'back' }
 const UI_PAD = { up: 'up', down: 'down', left: 'left', right: 'right', a: 'ok', b: 'back' }
+// Help for the device in use: list = [keyboard + mouse, gamepad, touch] (a missing one shows nothing; touch taps the menus).
+const uiShowFor = (list, on = true) => list.forEach((o, i) => o.setVisible(on && i === (Pad.touch ? 2 : Pad.active ? 1 : 0)))
 function uiKeys(scene, fn) {
   const on = (e) => { if (!e.repeat || /^(up|down|left|right)$/.test(UI_KEYS[e.code])) fn(e.code) }
   window.addEventListener('keydown', on)
@@ -290,8 +294,7 @@ function uiSettings(scene, under) {
       if (r.segs) r.segs.forEach((s, k) => s.setFillStyle(k < v ? COLORS.player : 0xffffff, k < v ? 1 : 0.12))
       else { r.sw.setTexture(v ? 'uiSwOn' : 'uiSwOff'); r.on.setVisible(!!v); r.off.setVisible(!v) }
     }
-    hints[0].setVisible(!Pad.active)
-    hints[1].setVisible(Pad.active)
+    uiShowFor(hints)
   }
   return ui
 }
@@ -413,6 +416,7 @@ class TitleScene extends Phaser.Scene {
       chipRow([['WASD / ARROWS', 'MOVE'], ['MOUSE', 'AIM'], ['HOLD LEFT CLICK', 'FIRE'], ['SHIFT', 'DASH'],
         ['SPACE / RIGHT CLICK', 'BOMB'], ['T', 'AUTO-FIRE'], ['P / ESC', 'PAUSE']]), // M: bottom-right "SOUND ON [M]"
       chipRow([['LEFT STICK', 'MOVE'], ['RIGHT STICK', 'AIM + FIRE'], ['LB / LT / A', 'DASH'], ['RB / B', 'BOMB'], ['START', 'PAUSE']]),
+      chipRow([['LEFT THUMB', 'MOVE'], ['RIGHT THUMB', 'AIM + FIRE'], ['DASH', 'DASH'], ['BOMB', 'BOMB'], ['II', 'PAUSE']]),
     ]
     this.padHint = [uiLabel(this, cx, 694, 'GAMEPAD SUPPORTED', 13, '#6f93bd', { blur: 0, spacing: 5 }),
       uiLabel(this, cx, 694, 'GAMEPAD CONNECTED', 13, '#e6fdff', { glow: UI_CYAN, blur: 8, spacing: 5 })]
@@ -458,6 +462,7 @@ class TitleScene extends Phaser.Scene {
   play() {
     if (this.leaving) return
     this.leaving = true
+    if (Pad.touch && !this.scale.isFullscreen) this.scale.startFullscreen() // phones: the whole screen (main.js turns it sideways)
     while (this.jobs.length) this.jobs.shift()() // whatever isn't painted yet: now, not mid-game
     this.scene.start('game')
   }
@@ -475,8 +480,7 @@ class TitleScene extends Phaser.Scene {
     this.ship.flicker()
     this.soundOn.setVisible(!SFX.muted)
     this.soundOff.setVisible(SFX.muted)
-    this.chips[0].setVisible(!Pad.active)
-    this.chips[1].setVisible(Pad.active)
+    uiShowFor(this.chips)
     this.padHint[0].setVisible(!Pad.connected)
     this.padHint[1].setVisible(Pad.connected)
 
@@ -487,12 +491,12 @@ class TitleScene extends Phaser.Scene {
   }
 }
 
-// First-run tutorial: [keyboard hint, pad hint, done(stats, step), seconds before it moves on anyway]
+// First-run tutorial: [keyboard hint, pad hint, touch hint, done(stats, step), seconds before it moves on anyway]
 const UI_TUTOR = [
-  ['tMove', 'tMovePad', (s, t) => t.dist > 350, 30],
-  ['tFire', 'tFirePad', (s, t) => s.shots - t.shots >= 12, 30],
-  ['tDash', 'tDashPad', (s, t) => s.dashes > t.dashes, 20],
-  ['tBomb', 'tBombPad', (s, t) => s.bombsUsed > t.bombs, 6],
+  ['tMove', 'tMovePad', 'tMoveTouch', (s, t) => t.dist > 350, 30],
+  ['tFire', 'tFirePad', 'tFireTouch', (s, t) => s.shots - t.shots >= 12, 30],
+  ['tDash', 'tDashPad', 'tDashTouch', (s, t) => s.dashes > t.dashes, 20],
+  ['tBomb', 'tBombPad', 'tBombTouch', (s, t) => s.bombsUsed > t.bombs, 6],
 ]
 
 class HudScene extends Phaser.Scene {
@@ -576,6 +580,7 @@ class HudScene extends Phaser.Scene {
     this.tut = Store.get('tutorial', false) ? null : { step: -1, age: -1.5 }
     this.createPause()
     uiKeys(this, (code) => this.key(code))
+    this.events.once('shutdown', () => Pad.showTouch(false))
 
     const events = { swarm: this.onSwarm, extralife: this.onExtraLife, boss: this.onBoss, bossdown: this.onBossDown,
       sector: this.onSector, powerup: this.onPowerup, kill: this.onKill, toast: this.onToast, upgrade: this.onUpgrade,
@@ -643,6 +648,7 @@ class HudScene extends Phaser.Scene {
     const g = this.g, h = CONFIG.arena.h, cfg = CONFIG.score, shown = this.shown
     const dt = Math.min(delta / 1000, 0.05), playing = g.state === 'playing'
     this.cameras.main.setVisible(g.state !== 'gameover') // the game-over screen shows the final stats
+    Pad.showTouch(playing && Pad.touch)
 
     if (shown.score !== g.score) {
       shown.score = g.score
@@ -691,8 +697,7 @@ class HudScene extends Phaser.Scene {
       if (this.settings.layer.visible) this.settings.sync()
       if (Pad.hit('start')) this.pauseMenu.act('back')
       else this.pauseTarget().pad()
-      this.pauseKeys[0].setVisible(!Pad.active)
-      this.pauseKeys[1].setVisible(Pad.active)
+      uiShowFor(this.pauseKeys)
     } else if (playing && Pad.hit('start')) g.togglePause()
 
     this.muteText.setVisible(SFX.muted)
@@ -761,12 +766,12 @@ class HudScene extends Phaser.Scene {
   // First run only: one hint at a time at the bottom, each cleared by doing it (or after a while).
   tutor(dt, playing) {
     const t = this.tut, s = this.g.stats
-    if (t.imgs) { t.imgs[0].setVisible(playing && !Pad.active); t.imgs[1].setVisible(playing && Pad.active) }
+    if (t.imgs) uiShowFor(t.imgs, playing)
     if (!playing || t.leaving || (t.age += dt) < 0) return
     if (t.step < 0) return this.tutorStep(0)
     const p = this.g.player
     t.dist += Math.hypot(p.vx, p.vy) * dt
-    const [, , done, max] = UI_TUTOR[t.step]
+    const [, , , done, max] = UI_TUTOR[t.step]
     const ok = done(s, t)
     if (!ok && t.age < max) return
     t.leaving = true
@@ -782,7 +787,7 @@ class HudScene extends Phaser.Scene {
     const t = this.tut, s = this.g.stats, { w, h } = CONFIG.arena
     if (i >= UI_TUTOR.length) { Store.set('tutorial', true); this.tut = null; return }
     Object.assign(t, { step: i, age: 0, dist: 0, leaving: false, shots: s.shots, dashes: s.dashes, bombs: s.bombsUsed })
-    t.imgs = UI_TUTOR[i].slice(0, 2).map(id => uiText(this, w / 2, h - 112, id).setAlpha(0))
+    t.imgs = UI_TUTOR[i].slice(0, 3).map(id => uiText(this, w / 2, h - 112, id).setAlpha(0))
     this.tweens.add({ targets: t.imgs, alpha: 1, duration: 300 })
   }
 
@@ -924,8 +929,7 @@ class GameOverScene extends Phaser.Scene {
   }
 
   update() {
-    this.hints[0].setVisible(!Pad.active)
-    this.hints[1].setVisible(Pad.active)
+    uiShowFor(this.hints)
     if (!this.ready) return
     if (Pad.hit('start')) this.again()
     else this.menu.pad()

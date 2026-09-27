@@ -51,7 +51,7 @@ const Upgrades = (() => {
   // Card labels as uiLabel args. All painted at boot: a blurred label can take ~140 ms to build in Firefox.
   const LABEL = {
     title: () => ['CHOOSE AN UPGRADE', 52, '#ffffff', { glow: uiHex(COLORS.accent), blur: 22, spacing: 10, weight: '900' }],
-    hint: () => ['CLICK A CARD   ·   KEYS 1 2 3   ·   ARROWS + ENTER   ·   D-PAD + A', 15, '#6f93bd', { blur: 0, spacing: 3 }],
+    hint: () => ['TAP OR CLICK A CARD   ·   KEYS 1 2 3   ·   ARROWS + ENTER   ·   D-PAD + A', 15, '#6f93bd', { blur: 0, spacing: 3 }],
     name: u => [u.name, 24, '#ffffff', { glow: uiHex(u.color), blur: 12, spacing: 3, weight: '900' }],
     desc: str => [str, 18, '#a9c8ea', { blur: 0, align: 'center', lineSpacing: 6, weight: '500' }],
   }

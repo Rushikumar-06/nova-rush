@@ -80,11 +80,15 @@ class GameScene extends Phaser.Scene {
       else if (e.code === 'KeyT') this.toggleAutofire()
     }
     const autoPause = () => { if (this.state === 'playing') this.togglePause() }
+    const upright = matchMedia('(orientation: portrait) and (pointer: coarse)') // index.html covers the game: "rotate"
+    const onTurn = () => { if (upright.matches) autoPause() }
     window.addEventListener('keydown', onKey)
+    upright.addEventListener('change', onTurn)
     this.game.events.on('blur', autoPause)
     this.game.events.on('hidden', autoPause)
     this.events.once('shutdown', () => {
       window.removeEventListener('keydown', onKey)
+      upright.removeEventListener('change', onTurn)
       this.game.events.off('blur', autoPause)
       this.game.events.off('hidden', autoPause)
       this.input.setDefaultCursor('default')

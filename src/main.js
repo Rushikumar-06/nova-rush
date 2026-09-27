@@ -22,6 +22,9 @@ class BootScene extends Phaser.Scene {
   }
 }
 
+// Going fullscreen turns a phone sideways too, where the browser allows it.
+document.addEventListener('fullscreenchange', () => { if (document.fullscreenElement) screen.orientation?.lock?.('landscape').catch(() => {}) })
+
 // right-click is the bomb: no context menu anywhere on the page (canvas or letterbox)
 document.addEventListener('contextmenu', e => e.preventDefault())
 
@@ -32,7 +35,8 @@ window.game = new Phaser.Game({
   backgroundColor: COLORS.bg,
   parent: 'game',
   audio: { noAudio: true },   // SFX runs its own Web Audio graph
-  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+  // fullscreen: the whole page, so the touch controls (outside the canvas) come along
+  scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, fullscreenTarget: document.documentElement },
   scene: [BootScene, TitleScene, GameScene, HudScene, UpgradeScene, GameOverScene],
 })
 game.events.on('prestep', Pad.poll) // one gamepad read per frame, shared by every scene

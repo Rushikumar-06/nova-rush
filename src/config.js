@@ -41,9 +41,7 @@ const CONFIG = {
     rampSeconds: 240,
     groupStart: 1,        // enemies per group at t=0
     groupEnd: 5,          // enemies per group at t=rampSeconds
-    speedRamp: 0.25,      // enemy speed multiplier grows 1 -> 1.25 over rampSeconds
     sectorRate: 0.15,     // per sector past the first: spawns come this much more often, swarms this much bigger
-    sectorSpeed: 0.06,    // per sector past the first: enemies this much faster
     minPlayerDist: 250,
     telegraph: 0.6,       // s of harmless fade-in before an enemy acts
     maxEnemies: 150,
