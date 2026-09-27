@@ -109,19 +109,24 @@ const Enemies = (() => {
   }
 
   // Shots fly straight, easing up to full speed. One touching the ship hurts it only if it is vulnerable
-  // (invulnerable, dashing or wrecked: they pass through).
+  // (invulnerable, dashing or wrecked: they pass through). One that came close while it was and gets away is a near miss.
   function moveShots(scene, dt) {
     const list = scene.ebullets, p = scene.player, hit = CONFIG.player.radius + EB.radius, m = 20
-    const open = scene.isVulnerable()
+    const near = (hit + CONFIG.score.graze) ** 2, open = scene.isVulnerable()
     let n = 0, hurt = false // compact in place: live shots move to the front
     for (let i = 0; i < list.length; i++) {
       const b = list[i]
       if (b.v < b.vmax) b.v = Math.min(b.vmax, b.v + b.acc * dt)
       b.x += b.ux * b.v * dt
       b.y += b.uy * b.v * dt
-      const dx = b.x - p.x, dy = b.y - p.y
-      if (open && !hurt && dx * dx + dy * dy < hit * hit) hurt = true
-      else if (b.x > -m && b.x < A.w + m && b.y > -m && b.y < A.h + m) { list[n++] = b; continue }
+      const dx = b.x - p.x, dy = b.y - p.y, d2 = dx * dx + dy * dy
+      if (open && !hurt && d2 < hit * hit) hurt = true
+      else if (b.x > -m && b.x < A.w + m && b.y > -m && b.y < A.h + m) {
+        if (d2 < near) b.near = b.near || open
+        else if (b.near) { b.near = false; scene.graze(b.x, b.y) }
+        list[n++] = b
+        continue
+      }
       freeShot(scene, b)
     }
     list.length = n
@@ -425,6 +430,7 @@ const Enemies = (() => {
       b.v = speed / 2
       b.vmax = speed
       b.acc = speed / 2 / EB.ease
+      b.near = false
       scene.ebullets.push(b)
       return b
     },

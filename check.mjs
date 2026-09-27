@@ -235,6 +235,18 @@ async function main() {
   await waitFor(`!Pad.touch && !Pad.active && !document.getElementById('touch').classList.contains('on')`, 'the mouse to take over from touch', 2000)
   check(true, 'touch buttons: DASH dashes, BOMB bombs, II pauses, RESUME tapped; the mouse takes over again')
 
+  // Near miss: an enemy shot flying past just outside the hitbox scores and bumps the streak; 49 -> 50 calls out RAMPAGE.
+  await js(`(() => { const g = ${G}; Enemies.clearAll(g, false); g.player.invuln = 0; g.player.vx = g.player.vy = 0; g.streak = 49
+    window.__graze = [g.stats.grazes, g.score, g.lives]; window.__call = null; g.events.once('streak', (t, n) => { window.__call = [t, n] })
+    Enemies.fire(g, g.player.x - 150, g.player.y - 40, 0, 400); return true })()`)
+  await waitFor(`${G}.stats.grazes > window.__graze[0]`, 'a shot passing close to count as a near miss', 3000)
+  const gz = await js(`(() => { const g = ${G}; return { points: g.score - window.__graze[1], streak: g.streak, hit: g.lives < window.__graze[2],
+    call: window.__call, tag: game.scene.getScene('hud').nearMiss.visible } })()`)
+  await sleep(300)
+  await shot('nearmiss')
+  check(gz.points > 0 && gz.streak === 50 && !gz.hit && gz.call?.[0] === 0 && gz.tag,
+    `near miss: +${gz.points} points, no hit, streak 49 -> 50 called out (tier ${gz.call?.[0]}), NEAR MISS shown`)
+
   // Mothership: skip to the end of sector 1, it arrives; destroy it, pick an upgrade, and the ship warps to sector 2.
   await js(`(() => { const g = ${G}; g.player.invuln = 60; g.sectorStart = g.elapsed - CONFIG.sector.duration; return true })()`)
   await waitFor(`!!${G}.boss && ${G}.boss.telegraph <= 0`, 'the mothership to arrive', 8000)

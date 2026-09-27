@@ -71,6 +71,7 @@ const UI_TEXT = {
   tBomb: uiTip('SPACE  OR  RIGHT CLICK  BOMBS THE SWARM'), tBombPad: uiTip('PRESS  RB  TO BOMB THE SWARM'),
   tMoveTouch: uiTip('DRAG ON THE LEFT SIDE TO MOVE'), tFireTouch: uiTip('DRAG ON THE RIGHT SIDE TO AIM AND FIRE'),
   tDashTouch: uiTip('TAP  DASH  TO DASH THROUGH DANGER'), tBombTouch: uiTip('TAP  BOMB  TO BOMB THE SWARM'),
+  nearMiss: ['NEAR MISS', 16, '#e6fdff', { glow: UI_CYAN, blur: 10, spacing: 5, weight: '900' }],
   paused: ['PAUSED', 110, '#e6fdff', { glow: UI_CYAN, blur: 28, spacing: 14, weight: '900' }],
   resume: uiItem('RESUME'), restart: uiItem('RESTART'), settings: uiItem('SETTINGS'), quit: uiItem('QUIT TO TITLE'),
   upgrades: uiCap('UPGRADES'), pauseKeys: uiHint('P / ESC  RESUME'), pausePad: uiHint('START / B  RESUME'),
@@ -93,6 +94,12 @@ const UI_TEXT = {
   again: uiItem('PLAY AGAIN'), menu: uiItem('MENU'),
   goKeys: uiHint('ENTER / R  PLAY AGAIN      ESC  MENU'), goPad: uiHint('A  PLAY AGAIN      B  MENU'),
 }
+// Kill-streak callouts, one per doubling of the streak from CONFIG.score.callout (50, 100, 200, 400); past the end the last repeats.
+const UI_STREAK = [['RAMPAGE', COLORS.rapid], ['UNSTOPPABLE', COLORS.spread], ['GODLIKE', COLORS.accent], ['SUPERNOVA', COLORS.spinner]]
+UI_STREAK.forEach(([name, color], i) => {
+  UI_TEXT['streak' + i] = [name, 56, '#ffffff', { glow: uiHex(color), blur: 24, spacing: 10, weight: '900' }]
+  UI_TEXT['streakSub' + i] = [`${CONFIG.score.callout * 2 ** i} KILL STREAK`, 22, '#cfe6ff', { blur: 0, spacing: 8 }]
+})
 const uiText = (scene, x, y, id) => uiLabel(scene, x, y, ...UI_TEXT[id])
 const uiSectorText = (scene, n) => uiLabel(scene, 0, 0, 'SECTOR ' + n, 60, '#ffffff', { glow: UI_CYAN, blur: 24, spacing: 10, weight: '900' })
 const uiSectorName = (scene, x, y, n) => uiLabel(scene, x, y, `SECTOR ${n}  ·  ${Space.name(n)}`, 13, '#8fb4d9', { blur: 0, spacing: 4 })
@@ -571,6 +578,7 @@ class HudScene extends Phaser.Scene {
     this.pops = []
     for (let i = 0; i < 24; i++) this.pops.push(this.add.bitmapText(0, 0, 'numW', '').setOrigin(0.5).setVisible(false))
     this.popI = 0
+    this.nearMiss = uiText(this, 0, 0, 'nearMiss').setVisible(false) // one tag, restarted by each near miss
 
     // Last life: red screen edges pulsing with a heartbeat (a plain border in low-detail mode).
     this.danger = (CONFIG.low ? this.add.rectangle(w / 2, h / 2, w - 8, h - 8).setStrokeStyle(8, COLORS.warning)
@@ -584,7 +592,7 @@ class HudScene extends Phaser.Scene {
 
     const events = { swarm: this.onSwarm, extralife: this.onExtraLife, boss: this.onBoss, bossdown: this.onBossDown,
       sector: this.onSector, powerup: this.onPowerup, kill: this.onKill, toast: this.onToast, upgrade: this.onUpgrade,
-      choosing: this.onChoosing }
+      choosing: this.onChoosing, graze: this.onGraze, streak: this.onStreak }
     for (const [ev, fn] of Object.entries(events)) g.events.on(ev, fn, this)
     this.events.once('shutdown', () => { for (const [ev, fn] of Object.entries(events)) g.events.off(ev, fn, this) })
   }
@@ -740,6 +748,21 @@ class HudScene extends Phaser.Scene {
     p.setPosition(Phaser.Math.Clamp(x, 70, CONFIG.arena.w - 70), p.y0).setVisible(true).setAlpha(1)
     p.t = 0
     p.life = tier > 1 ? 1.4 : 0.8
+  }
+
+  onGraze(x, y, points) {
+    this.onKill(x, y, points)
+    const p = this.g.player, t = this.nearMiss
+    this.tweens.killTweensOf(t)
+    t.setPosition(p.x, p.y - 52).setVisible(true).setAlpha(1).setScale(1.3)
+    this.tweens.add({ targets: t, scale: 1, duration: 160, ease: 'Back.Out' })
+    this.tweens.add({ targets: t, alpha: 0, y: t.y - 24, delay: 420, duration: 300, onComplete: () => t.setVisible(false) })
+  }
+
+  onStreak(tier) {
+    const i = Math.min(tier, UI_STREAK.length - 1)
+    this.banner(uiText(this, 0, 0, 'streak' + i), UI_STREAK[i][1], 620, tier === i ? uiText(this, 0, 78, 'streakSub' + i) : null)
+    SFX.play('streak', { tier })
   }
 
   updatePops(dt) {

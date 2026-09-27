@@ -34,7 +34,7 @@ class GameScene extends Phaser.Scene {
     this.fireCd = 0
     this.gun = 1           // wing cannon that fires next (the single stream alternates)
     this.beat = 0          // real seconds left of the death beat; > 0 = player dead
-    this.stats = { shots: 0, hits: 0, maxMult: 1, dashes: 0, bombsUsed: 0, bosses: 0, pickups: 0 }
+    this.stats = { shots: 0, hits: 0, maxMult: 1, dashes: 0, bombsUsed: 0, bosses: 0, pickups: 0, grazes: 0 }
     this.moveX = this.moveY = 0 // movement input this frame (unit vector or less): the dash goes this way
     this.dashCd = 0        // s until the dash recharges
     this.ringFlash = 0     // s left of the "dash ready" ring
@@ -330,15 +330,33 @@ class GameScene extends Phaser.Scene {
 
   killEnemy(e) {
     if (!this.enemies.includes(e)) return // already dead (two hits in one frame)
-    const S = CONFIG.score, boss = e.kind === 'boss', x = e.x, y = e.y
+    const boss = e.kind === 'boss', x = e.x, y = e.y
     const points = Enemies.kill(this, e) * this.multiplier
-    this.score += points
     this.kills++
-    this.streak++
-    this.multiplier = Math.min(S.maxMult, 1 + Math.floor(this.streak / S.streakPerMult))
-    this.stats.maxMult = Math.max(this.stats.maxMult, this.multiplier)
-    this.best = Math.max(this.best, this.score)
+    this.addScore(points)
+    this.addStreak(1)
     if (points > 0) this.events.emit('kill', x, y, points, e.kind)
+    if (boss) {
+      this.stats.bosses++
+      this.sectorClear()
+    }
+  }
+
+  // Near miss: an enemy or its shot came within CONFIG.score.graze px of the hitbox and got away (Enemies / collidePlayer).
+  graze(x, y) {
+    const points = CONFIG.score.grazePoints * this.multiplier
+    this.stats.grazes++
+    this.addScore(points)
+    this.addStreak(1)
+    FX.muzzle(this, x, y, COLORS.player, 0.35)
+    SFX.play('graze')
+    this.events.emit('graze', x, y, points)
+  }
+
+  addScore(points) {
+    const S = CONFIG.score
+    this.score += points
+    this.best = Math.max(this.best, this.score)
     while (this.score >= this.nextExtra) {   // award every threshold crossed
       this.nextExtra += S.extraEvery * (1 + S.extraGrowth * (this.sector - 1))
       this.lives++
@@ -346,10 +364,16 @@ class GameScene extends Phaser.Scene {
       SFX.play('extraLife')
       this.events.emit('extralife')
     }
-    if (boss) {
-      this.stats.bosses++
-      this.sectorClear()
-    }
+  }
+
+  // The multiplier follows the streak; the streak reaching CONFIG.score.callout, then each doubling of it, gets a callout.
+  addStreak(n) {
+    const S = CONFIG.score, tier = (s) => Math.floor(Math.log2(s / S.callout)) // 50 -> 0, 100 -> 1, 200 -> 2, ...
+    const was = this.streak
+    this.streak += n
+    this.multiplier = Math.min(S.maxMult, 1 + Math.floor(this.streak / S.streakPerMult))
+    this.stats.maxMult = Math.max(this.stats.maxMult, this.multiplier)
+    if (this.streak >= S.callout && tier(this.streak) > tier(was)) this.events.emit('streak', tier(this.streak), this.streak)
   }
 
   // Mothership down: a beat to enjoy it, the field is swept, the pilot picks an upgrade (game paused), then the warp.
@@ -397,11 +421,13 @@ class GameScene extends Phaser.Scene {
   }
 
   collidePlayer() {
-    const p = this.player
+    const p = this.player, near = CONFIG.score.graze
     for (const e of this.enemies) {
       if (e.telegraph > 0) continue
-      const r = CONFIG.player.radius + e.radius
-      if ((e.x - p.x) ** 2 + (e.y - p.y) ** 2 < r * r) return this.hurtPlayer(e)
+      const r = CONFIG.player.radius + e.radius, d2 = (e.x - p.x) ** 2 + (e.y - p.y) ** 2
+      if (d2 < r * r) return this.hurtPlayer(e)
+      if (d2 < (r + near) ** 2) e.near = true
+      else if (e.near && !e.grazed) { e.grazed = true; this.graze(e.x, e.y) } // once per enemy: no farming a slow one
     }
   }
 

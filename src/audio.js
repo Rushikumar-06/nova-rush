@@ -116,6 +116,8 @@ const SFX = (() => {
     // movement + UI + notifications
     dash() { noise('bandpass', 700, 3200, 0.2, 0.35); tone('sine', 420, 140, 0.14, 0.08) },
     dashReady() { tone('sine', 1568, 1568, 0.07, 0.045) },
+    graze() { tone('sine', 2093 * r(0.97, 1.03), 2794, 0.06, 0.05) },
+    streak(o) { const k = 2 ** (Math.min((o && o.tier) || 0, 3) / 6); [440, 554, 659, 880].forEach((f, i) => tone('sawtooth', f * k, f * k, 0.1, 0.1, i * 0.06)) }, // up a tone per tier
     uiMove() { tone('triangle', 1400, 1100, 0.035, 0.07) },
     uiSelect() { tone('triangle', 880, 880, 0.07, 0.12); tone('triangle', 1320, 1320, 0.12, 0.12, 0.06) },
     uiBack() { tone('triangle', 660, 660, 0.07, 0.11); tone('triangle', 440, 440, 0.12, 0.11, 0.06) },

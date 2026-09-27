@@ -33,6 +33,9 @@ const CONFIG = {
     maxMult: 10,
     extraEvery: 175000,   // +1 life and +1 bomb per this many points ...
     extraGrowth: 0.5,     // ... and the gap to the next one grows by this x extraEvery per sector past the first
+    graze: 30,            // px past the hitbox: an enemy or shot that comes this close and gets away is a near miss ...
+    grazePoints: 50,      // ... worth this x the multiplier, and +1 streak (once per enemy / shot)
+    callout: 50,          // kill-streak callout at this streak, then at every doubling (100, 200, 400, ...)
   },
 
   spawn: {
@@ -119,7 +122,7 @@ const CONFIG = {
     volume: 0.6,                                             // master gain
     // s between repeats of the same SFX: many enemies firing / locking in one frame make one sound, not a stack
     minGap: { shoot: 0.075, explode: 0.03, bossHit: 0.07, eshot: 0.06, lock: 0.12, lunge: 0.1,
-      dash: 0.1, dashReady: 0.3, uiMove: 0.03, uiSelect: 0.08, uiBack: 0.08, upgrade: 0.5, heartbeat: 0.5, toast: 0.25 },
+      dash: 0.1, dashReady: 0.3, graze: 0.05, uiMove: 0.03, uiSelect: 0.08, uiBack: 0.08, upgrade: 0.5, heartbeat: 0.5, toast: 0.25 },
   },
 
   hud: { maxIcons: 6 },   // life/bomb icons shown before a "+N" counter
