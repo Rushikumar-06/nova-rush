@@ -1,6 +1,10 @@
 // NOVA RUSH - GameScene: player ship, weapons, bullets, collisions, scoring, bomb, dash, power-ups, upgrades,
-// sectors (mothership -> upgrade pick -> warp), death/respawn. Keyboard + mouse, or a gamepad (Pad).
+// sectors (mothership -> upgrade pick -> warp -> twist), death/respawn, achievements. Keyboard + mouse, or a gamepad (Pad).
+// data.daily = the daily challenge: seeded spawns / drops / twists / offers (this.rng) and its own best score.
 // Pausing is the HUD's job (it stays awake to run the pause menu); this scene only auto-pauses on blur.
+
+// The sector twist in force (CONFIG.sector.twists, read by Enemies / Pickups / scoring); i = its index, -1 = none.
+const NO_TWIST = { name: '', i: -1, swarms: 1, kind: null, pace: 1, drops: true, score: 1 }
 
 // squared distance from (px, py) to segment (x0, y0)-(x1, y1): swept bullet hits, no tunneling
 function segDist2(x0, y0, x1, y1, px, py) {
@@ -13,11 +17,13 @@ function segDist2(x0, y0, x1, y1, px, py) {
 class GameScene extends Phaser.Scene {
   constructor() { super('game') }
 
-  create() {
-    const { w, h } = CONFIG.arena
+  create(data) {
+    const { w, h } = CONFIG.arena, ship = this.craft = Ship.kind
+    this.daily = data && data.daily ? Daily.today() : 0 // UTC day number of today's challenge; 0 = a normal run
+    this.rng = { spawn: this.stream(1), drops: this.stream(2), up: Math.random }
     this.score = 0
-    this.best = this.startBest = Store.get('best', 0)
-    this.lives = CONFIG.player.lives
+    this.best = this.startBest = this.daily ? Daily.best(this.daily) : Store.get('best', 0)
+    this.lives = CONFIG.player.lives + (ship.lives || 0)
     this.bombs = CONFIG.player.bombs
     this.multiplier = 1
     this.streak = 0
@@ -27,6 +33,9 @@ class GameScene extends Phaser.Scene {
     this.nextExtra = CONFIG.score.extraEvery
     this.sector = 1
     this.sectorStart = 0   // elapsed when this sector began; its mothership comes CONFIG.sector.duration later
+    this.twist = NO_TWIST
+    this.sectorHit = false // took a hit this sector (the no-hit achievement)
+    this.lifeKills = (Store.get('lifetime', {}) || {}).kills || 0
     this.warping = 0       // s left of the sector-clear + warp sequence (nothing spawns meanwhile)
     this.boss = null
     this.bullets = []
@@ -47,6 +56,8 @@ class GameScene extends Phaser.Scene {
     Enemies.init(this)
     Pickups.init(this)
     Upgrades.init(this)
+    for (const k in ship.mods) this.mods[k] *= ship.mods[k]
+    this.hue = Ship.color
 
     const p = this.player = this.add.image(w / 2, h / 2, 'player').setDepth(20).setScale(0.5).setRotation(-Math.PI / 2)
     p.vx = p.vy = 0
@@ -62,7 +73,7 @@ class GameScene extends Phaser.Scene {
     this.bubble = this.add.image(p.x, p.y, 'bubble').setDepth(21).setScale(0.5).setBlendMode(Phaser.BlendModes.ADD).setVisible(false)
     this.ghosts = []       // dash afterimages, recycled round-robin
     for (let i = 0; i < 6; i++) {
-      this.ghosts.push(this.add.image(0, 0, 'player').setDepth(19).setTint(COLORS.player).setBlendMode(Phaser.BlendModes.ADD).setVisible(false))
+      this.ghosts.push(this.add.image(0, 0, 'player').setDepth(19).setTint(this.hue).setBlendMode(Phaser.BlendModes.ADD).setVisible(false))
     }
     this.ghostI = this.ghostT = 0
     this.dashRing = this.add.graphics().setDepth(21) // small arc, redrawn only while recharging
@@ -96,6 +107,9 @@ class GameScene extends Phaser.Scene {
 
     this.scene.launch('hud')
   }
+
+  // A random source: seeded by today + tag in the daily challenge (the same for everyone), else Math.random.
+  stream(tag) { return this.daily ? seeded(this.daily * 1000 + tag) : Math.random }
 
   update(time, delta) {
     const real = Math.min(delta / 1000, 0.05)
@@ -253,7 +267,7 @@ class GameScene extends Phaser.Scene {
       FX.muzzle(this, x, y)
     }
     if (this.power.spread > 0) for (const k of [-2, -1, 0, 1, 2]) shoot(Math.sign(k), k * 0.14)
-    else if (m >= W.spreadAt) { shoot(-1); shoot(1); shoot(0, -W.spreadAngle); shoot(0, W.spreadAngle) }
+    else if (m >= W.spreadAt || this.craft.spread) { shoot(-1); shoot(1); shoot(0, -W.spreadAngle); shoot(0, W.spreadAngle) }
     else if (m >= W.twinAt) { shoot(-1); shoot(1) }
     else shoot(this.gun = -this.gun)
     SFX.play('shoot')
@@ -331,20 +345,28 @@ class GameScene extends Phaser.Scene {
   killEnemy(e) {
     if (!this.enemies.includes(e)) return // already dead (two hits in one frame)
     const boss = e.kind === 'boss', x = e.x, y = e.y
-    const points = Enemies.kill(this, e) * this.multiplier
+    const points = Enemies.kill(this, e) * this.multiplier * this.twist.score
     this.kills++
+    if (this.lifeKills + this.kills >= 1000) this.unlock('kills')
     this.addScore(points)
     this.addStreak(1)
     if (points > 0) this.events.emit('kill', x, y, points, e.kind)
     if (boss) {
       this.stats.bosses++
+      if (this.sector >= 5) this.unlock('sector5')
+      if (!this.sectorHit) this.unlock('nohit')
       this.sectorClear()
     }
   }
 
+  // Achievements unlock ship colors (CONFIG.colors): announced once, remembered across runs.
+  unlock(id) {
+    if (Unlocks.add(id)) this.events.emit('toast', 'unlock' + CONFIG.colors.findIndex(c => c.unlock === id))
+  }
+
   // Near miss: an enemy or its shot came within CONFIG.score.graze px of the hitbox and got away (Enemies / collidePlayer).
   graze(x, y) {
-    const points = CONFIG.score.grazePoints * this.multiplier
+    const points = CONFIG.score.grazePoints * this.multiplier * this.twist.score
     this.stats.grazes++
     this.addScore(points)
     this.addStreak(1)
@@ -390,6 +412,7 @@ class GameScene extends Phaser.Scene {
       this.syncCursor()
       this.events.emit('choosing')
       let done = false
+      this.rng.up = this.stream(100 + this.sector)
       Upgrades.offer(this, () => {
         if (done || this.state !== 'choosing') return
         done = true
@@ -411,8 +434,19 @@ class GameScene extends Phaser.Scene {
   endWarp() {
     this.sector++
     this.sectorStart = this.elapsed
+    this.twist = this.rollTwist()
+    this.sectorHit = false
     Enemies.nextSector(this)
     this.events.emit('sector', this.sector)
+  }
+
+  // A random twist for this sector from CONFIG.sector.twistFrom on, never the last one again.
+  rollTwist() {
+    const C = CONFIG.sector
+    if (this.sector < C.twistFrom) return NO_TWIST
+    const left = C.twists.map((t, k) => k).filter(k => k !== this.twist.i)
+    const i = left[Math.floor(this.stream(200 + this.sector)() * left.length)]
+    return { ...NO_TWIST, ...C.twists[i], i }
   }
 
   isVulnerable() {
@@ -435,6 +469,7 @@ class GameScene extends Phaser.Scene {
   // it pops, rams the enemy that touched it (a mothership shrugs it off) and buys a second of safety.
   hurtPlayer(src = null) {
     if (!this.isVulnerable()) return false
+    this.sectorHit = true
     if (!this.shield) {
       this.hitPlayer()
       return true
@@ -452,7 +487,7 @@ class GameScene extends Phaser.Scene {
   hitPlayer() {
     if (this.state !== 'playing') return
     const p = this.player
-    FX.explode(this, p.x, p.y, COLORS.player, 3)
+    FX.explode(this, p.x, p.y, this.hue, 3)
     FX.flash(this, COLORS.splitter, 300)
     FX.shake(this, CONFIG.fx.shakeHit)
     SFX.play('death')
@@ -504,8 +539,9 @@ class GameScene extends Phaser.Scene {
     p.setScale(0.5, 0.5 * sy)
     const fwd = Phaser.Math.Clamp((cos * p.vx + sin * p.vy) / P.maxSpeed, 0, 1.6)
     const len = (0.45 + 0.8 * fwd) * Phaser.Math.FloatBetween(0.85, 1.15)
+    const [sl, sw] = this.craft.shape || [1, 1] // the ship's art stretch: its nozzles move with it
     for (const f of this.flames) {
-      const ox = -27.5, oy = 7 * f.side * sy
+      const ox = -27.5 * sl, oy = 7 * f.side * sy * sw
       f.setPosition(p.x + cos * ox - sin * oy, p.y + sin * ox + cos * oy).setRotation(p.rotation)
         .setScale(0.5 * len, 0.5 * sy).setAlpha(0.75 + 0.25 * Math.random()).setVisible(p.visible)
     }
@@ -524,7 +560,7 @@ class GameScene extends Phaser.Scene {
     if (this.ringFlash > 0) this.ringFlash -= dt
     if (p.visible && (this.dashCd > 0 || this.ringFlash > 0)) {
       const full = P.dash.cooldown * this.mods.dashCooldown, k = this.dashCd > 0 ? 1 - this.dashCd / full : 1
-      ring.lineStyle(2.5, COLORS.player, this.dashCd > 0 ? 0.3 : 3.6 * this.ringFlash)
+      ring.lineStyle(2.5, this.hue, this.dashCd > 0 ? 0.3 : 3.6 * this.ringFlash)
         .beginPath().arc(p.x, p.y, 34, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2).strokePath()
       this.ringLit = true
     }
@@ -553,7 +589,7 @@ class GameScene extends Phaser.Scene {
     this.saveBest()
     this.scene.stop('upgrade')
     this.scene.stop('hud')
-    this.scene.start('game')
+    this.scene.start('game', { daily: this.daily > 0 }) // explicit: Phaser keeps the last data when given none
   }
 
   quitToTitle() {
@@ -565,7 +601,7 @@ class GameScene extends Phaser.Scene {
 
   saveBest() {
     const newBest = this.score > this.startBest
-    if (newBest) Store.set('best', this.score)
+    if (newBest) this.daily ? Store.set('daily', { day: this.daily, best: this.score }) : Store.set('best', this.score)
     return newBest
   }
 
@@ -581,7 +617,7 @@ class GameScene extends Phaser.Scene {
     this.syncCursor()
     const s = this.stats
     const payload = { score: this.score, best: this.best, newBest, elapsed: this.elapsed, kills: this.kills, sector: this.sector,
-      shots: s.shots, hits: s.hits, maxMult: s.maxMult, bosses: s.bosses, upgrades: this.upgrades.slice() }
+      shots: s.shots, hits: s.hits, maxMult: s.maxMult, bosses: s.bosses, upgrades: this.upgrades.slice(), daily: this.daily > 0 }
     this.events.emit('gameover', payload)
     this.scene.launch('gameover', payload)
   }

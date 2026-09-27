@@ -1,5 +1,6 @@
 // NOVA RUSH - power-ups dropped by kills (and 3 per mothership): rapid fire, spread shot, shield, extra bomb.
 // A pickup is an Image with type, life (s left) and t (animation clock). Near the ship it is pulled in.
+// Drops draw from scene.rng.drops (seeded in the daily challenge); a NO POWER-UPS sector twist stops them.
 
 const Pickups = (() => {
   const P = CONFIG.pickups, TAU = Math.PI * 2
@@ -7,7 +8,7 @@ const Pickups = (() => {
 
   function pick(scene) {
     const w = { ...P.weights, bomb: P.weights.bomb * P.bombFade ** (scene.sector - 1) }
-    let roll = Math.random() * Object.values(w).reduce((a, b) => a + b, 0)
+    let roll = scene.rng.drops() * Object.values(w).reduce((a, b) => a + b, 0)
     for (const k in w) if ((roll -= w[k]) <= 0) return k
     return 'rapid'
   }
@@ -22,12 +23,12 @@ const Pickups = (() => {
     },
 
     maybeDrop(scene, e) {
-      if (Math.random() < (e.kind === 'splitter' || e.kind === 'brute' ? P.splitterChance : P.chance)) Pickups.drop(scene, e.x, e.y)
+      if (scene.rng.drops() < (e.kind === 'splitter' || e.kind === 'brute' ? P.splitterChance : P.chance)) Pickups.drop(scene, e.x, e.y)
     },
 
     // force: mothership drops ignore the on-screen cap
     drop(scene, x, y, type = pick(scene), force = false) {
-      if (!force && scene.pickups.length >= P.max) return null
+      if (!scene.twist.drops || (!force && scene.pickups.length >= P.max)) return null
       const { w, h } = CONFIG.arena, r = P.radius + 8
       const o = scene.add.image(Phaser.Math.Clamp(x, r, w - r), Phaser.Math.Clamp(y, r, h - r), 'pu_' + type).setDepth(12)
       o.type = type

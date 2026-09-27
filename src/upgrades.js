@@ -52,6 +52,8 @@ const Upgrades = (() => {
   const LABEL = {
     title: () => ['CHOOSE AN UPGRADE', 52, '#ffffff', { glow: uiHex(COLORS.accent), blur: 22, spacing: 10, weight: '900' }],
     hint: () => ['TAP OR CLICK A CARD   ·   KEYS 1 2 3   ·   ARROWS + ENTER   ·   D-PAD + A', 15, '#6f93bd', { blur: 0, spacing: 3 }],
+    swap: () => ['SWAP', 16, '#e6fdff', { glow: uiHex(COLORS.player), blur: 8, spacing: 6, weight: '900' }],
+    swapHint: () => ['ONE SWAP PER RUN   ·   TAP OR CLICK SWAP   ·   KEY R   ·   PAD Y', 15, '#6f93bd', { blur: 0, spacing: 3 }],
     name: u => [u.name, 24, '#ffffff', { glow: uiHex(u.color), blur: 12, spacing: 3, weight: '900' }],
     desc: str => [str, 18, '#a9c8ea', { blur: 0, align: 'center', lineSpacing: 6, weight: '500' }],
   }
@@ -80,11 +82,11 @@ const Upgrades = (() => {
     c.strokeStyle = hex(mix(color, 0xffffff, 0.65)); c.lineWidth = lw * 0.6; c.stroke()
   }
 
-  // up to 3 different upgrades, weighted, never one already maxed out
-  function roll(scene) {
-    const left = POOL.filter(u => count(scene, u.id) < u.max), out = []
-    while (out.length < 3 && left.length) {
-      let r = Math.random() * left.reduce((s, u) => s + u.weight, 0), i = 0
+  // up to n different upgrades, weighted, never one already maxed out or in skip (scene.rng.up: seeded in the daily)
+  function roll(scene, n = 3, skip = []) {
+    const left = POOL.filter(u => count(scene, u.id) < u.max && !skip.includes(u)), out = []
+    while (out.length < n && left.length) {
+      let r = scene.rng.up() * left.reduce((s, u) => s + u.weight, 0), i = 0
       while (i < left.length - 1 && (r -= left[i].weight) > 0) i++
       out.push(left.splice(i, 1)[0])
     }
@@ -174,6 +176,7 @@ const Upgrades = (() => {
   return {
     POOL,
     count,
+    roll,
     desc: (u, n) => descs(u)[Math.min(n, descs(u).length - 1)],
     label: (scene, x, y, kind, arg) => uiLabel(scene, x, y, ...LABEL[kind](arg)),
 
@@ -191,14 +194,14 @@ const Upgrades = (() => {
       })
       canvasTex(scene, 'upPip', 32, 32, c => { c.beginPath(); poly(c, [[0, -6], [6, 0], [0, 6], [-6, 0]]); neon(c, 0xffffff, 1.4, 1) })
       const pre = (kind, arg) => Upgrades.label(scene, 0, 0, kind, arg).destroy()
-      pre('title')
-      pre('hint')
+      for (const k of ['title', 'hint', 'swap', 'swapHint']) pre(k)
       for (const u of POOL) { pre('name', u); descs(u).forEach(d => pre('desc', d)) }
     },
 
     init(scene) {
       scene.mods = { fireRate: 1, speed: 1, pierce: 0, ricochet: 0, damage: 1, bulletSpeed: 1, dashCooldown: 1, magnet: 1, duration: 1 }
       scene.upgrades = []
+      scene.swaps = 1 // offered cards the pilot may swap out this run (UpgradeScene.swap)
       // this run's drones and missiles (a restart destroys the old ones with the scene)
       const u = scene._up = { drones: [], live: [], pool: [], missiles: 0, missileT: 0, side: 1, orbit: 0, aegis: false }
       const onSector = () => {
@@ -245,6 +248,7 @@ const Upgrades = (() => {
 })()
 
 // The pick: three cards over the paused arena. Click, 1/2/3, arrows or A/D + Enter/Space, or the pad (left/right + A).
+// Once per run a card can be swapped for another: its SWAP button, or R / pad Y for the focused one.
 class UpgradeScene extends Phaser.Scene {
   constructor() { super('upgrade') }
 
@@ -262,9 +266,11 @@ class UpgradeScene extends Phaser.Scene {
     const title = Upgrades.label(this, w / 2, 150, 'title')
     this.tweens.add({ targets: title, alpha: { from: 0, to: 1 }, duration: 600, ease: uiFlickerEase })
     Upgrades.label(this, w / 2, 810, 'hint')
+    const slotX = i => w / 2 + (i - (n - 1) / 2) * GAP
 
-    this.cards = choices.map((u, i) => {
-      const x = w / 2 + (i - (n - 1) / 2) * GAP, y = 480, have = Upgrades.count(g, u.id)
+    // card u rises into slot i (again after a swap)
+    this.card = (u, i) => {
+      const x = slotX(i), y = 480, have = Upgrades.count(g, u.id)
       const glow = this.add.image(0, 0, 'glow').setDisplaySize(CW * 1.8, CH * 1.5).setTint(u.color).setBlendMode(ADD).setAlpha(0)
       const box = rect(this.add.graphics().fillStyle(0x060a16, 0.94), true)
       box.fillStyle(u.color, 0.08).fillRoundedRect(-CW / 2, -CH / 2, CW, 170, { tl: R, tr: R, bl: 0, br: 0 })
@@ -287,11 +293,26 @@ class UpgradeScene extends Phaser.Scene {
       const c = this.add.container(x, y + 300, [...parts, flash]).setAlpha(0)
       Object.assign(c, { u, hi, glow, flash })
       this.tweens.add({ targets: c, y, alpha: 1, duration: 380, delay: 60 * i, ease: 'Back.Out' }) // done before input opens
-      this.add.zone(x, y, CW, CH).setInteractive({ useHandCursor: true })
+      return c
+    }
+    this.cards = choices.map((u, i) => {
+      this.add.zone(slotX(i), 480, CW, CH).setInteractive({ useHandCursor: true })
         .on('pointerover', () => this.focus(i))
         .on('pointerdown', ptr => { if (ptr.button === 0) this.pick(i) })
-      return c
+      return this.card(u, i)
     })
+
+    // the run's swap: a SWAP button under each card, gone once used
+    this.swapUi = this.add.container(0, 0).setAlpha(0).setVisible(g.swaps > 0)
+    const box = this.add.graphics().lineStyle(2, COLORS.player, 0.6).fillStyle(COLORS.player, 0.08)
+    this.swapUi.add([box, Upgrades.label(this, w / 2, 846, 'swapHint')])
+    choices.forEach((u, i) => {
+      const x = slotX(i)
+      box.fillRoundedRect(x - 70, 716, 140, 40, 10).strokeRoundedRect(x - 70, 716, 140, 40, 10)
+      this.swapUi.add([Upgrades.label(this, x, 736, 'swap'), this.add.zone(x, 736, 140, 40).setInteractive({ useHandCursor: true })
+        .on('pointerdown', ptr => { if (ptr.button === 0) this.swap(i) })])
+    })
+    this.tweens.add({ targets: this.swapUi, alpha: 1, duration: 300, delay: 400 })
 
     this.input.keyboard.on('keydown', e => {
       if (e.repeat) return
@@ -300,6 +321,7 @@ class UpgradeScene extends Phaser.Scene {
       else if (k === 'ArrowLeft' || k === 'KeyA') this.focus(this.sel - 1)
       else if (k === 'ArrowRight' || k === 'KeyD') this.focus(this.sel + 1)
       else if (k === 'Enter' || k === 'NumpadEnter' || k === 'Space') this.pick(this.sel)
+      else if (k === 'KeyR') this.swap(this.sel)
     })
   }
 
@@ -307,6 +329,7 @@ class UpgradeScene extends Phaser.Scene {
     if (Pad.hit('left')) this.focus(this.sel - 1)
     if (Pad.hit('right')) this.focus(this.sel + 1)
     if (Pad.hit('a')) this.pick(this.sel)
+    if (Pad.hit('y')) this.swap(this.sel)
     const k = Math.min(1, delta / 70), pulse = 0.28 + 0.1 * Math.sin(time / 150)
     for (let i = 0; i < this.cards.length; i++) {
       const c = this.cards[i], on = i === this.sel
@@ -321,6 +344,21 @@ class UpgradeScene extends Phaser.Scene {
     if (this.picked || i === this.sel) return
     this.sel = i
     SFX.play('uiMove')
+  }
+
+  // The run's one swap: card i makes way for an upgrade not already on offer.
+  swap(i) {
+    const g = this.scene.get('game'), old = this.cards[i]
+    if (!old || !this.ready || this.picked || g.swaps <= 0) return
+    const [u] = Upgrades.roll(g, 1, this.cards.map(c => c.u))
+    if (!u) return // nothing else left to offer
+    g.swaps--
+    this.swapUi.setVisible(false)
+    this.tweens.killTweensOf([old, ...old.list])
+    old.destroy()
+    this.cards[i] = this.card(u, i)
+    this.sel = i
+    SFX.play('uiSelect')
   }
 
   pick(i) {

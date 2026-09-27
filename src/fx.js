@@ -67,8 +67,9 @@ const FX = (() => {
   const linGrad = (c, x0, y0, x1, y1, stops) => { const g = c.createLinearGradient(x0, y0, x1, y1); stops.forEach(([o, col]) => g.addColorStop(o, col)); return g }
 
   // Top-down fighter in display pixels, nose toward +x (~60 long, ~49 wide). Light falls from the -y side.
-  function drawShip(c) {
-    const edge = '#0b121b', stripe = hex(COLORS.player)
+  // color: stripes and rim; guns: a second cannon pair further out on the wings.
+  function drawShip(c, color = COLORS.player, guns = false) {
+    const edge = '#0b121b', stripe = hex(color)
     const hull = () => {
       c.beginPath()
       c.moveTo(31, 0)
@@ -86,7 +87,7 @@ const FX = (() => {
 
     // faint cyan rim so the ship reads on any backdrop (only its blur shows past the opaque hull)
     c.save()
-    c.shadowColor = stripe; c.shadowBlur = 10; c.fillStyle = 'rgba(0,229,255,0.35)'
+    c.shadowColor = stripe; c.shadowBlur = 10; c.fillStyle = stripe + '59' // 35%
     for (const s of [-1, 1]) { wing(s); c.fill(); nacelle(s); c.fill() }
     hull(); c.fill()
     c.restore()
@@ -100,6 +101,7 @@ const FX = (() => {
       line(c, -14.5, 7 * s, -18.5, 20.5 * s, 'rgba(12,20,30,0.55)', 0.7)  // flap
       c.fillStyle = '#28313b'; c.fillRect(0, 9.5 * s - 1.1, 17, 2.2)     // wing cannon
       c.fillStyle = '#dfe7ef'; c.fillRect(16, 9.5 * s - 1.1, 2, 2.2)
+      if (guns) { c.fillStyle = '#28313b'; c.fillRect(-6, 16 * s - 1.1, 15, 2.2); c.fillStyle = '#dfe7ef'; c.fillRect(8, 16 * s - 1.1, 2, 2.2) }
       glowDot(c, -17.5, 23.2 * s, s < 0 ? '#ff4d4d' : '#4dff88', 1.5)   // nav lights: red port, green starboard
     }
     for (const s of [-1, 1]) {
@@ -138,10 +140,26 @@ const FX = (() => {
   return {
     get cursor() { return cursor },  // CSS cursor: the OS draws the crosshair, so aiming has no frame lag
 
+    // The ship (and its HUD life icon) as the hangar has it: redrawn in place, so every image showing it follows.
+    paintShip(scene, kind = Ship.kind, color = Ship.color) {
+      const art = [['player', 184, 184, c => c.scale(2, 2)], // 2x: stays crisp when rotated
+        ['lifeIcon', 34, 34, c => { c.rotate(-Math.PI / 2); c.scale(0.46, 0.46) }]]
+      for (const [key, w, h, fit] of art) {
+        const tex = scene.textures.exists(key) ? scene.textures.get(key) : scene.textures.createCanvas(key, w, h), c = tex.context
+        c.setTransform(1, 0, 0, 1, 0, 0)
+        c.clearRect(0, 0, w, h)
+        c.translate(w / 2, h / 2)
+        c.lineJoin = c.lineCap = 'round'
+        fit(c)
+        c.scale(...(kind.shape || [1, 1]))
+        drawShip(c, color, kind.guns)
+        tex.refresh()
+      }
+    },
+
     makeTextures(scene) {
       const E = CONFIG.enemies
-      canvasTex(scene, 'player', 172, 148, c => { c.scale(2, 2); drawShip(c) }) // 2x: stays crisp when rotated
-      canvasTex(scene, 'lifeIcon', 34, 34, c => { c.rotate(-Math.PI / 2); c.scale(0.46, 0.46); drawShip(c) })
+      FX.paintShip(scene)
 
       // engine flame, origin at its right end (the nozzle); white-hot core -> orange -> faint blue tip
       const fl = scene.textures.createCanvas('flame', 96, 32), fc = fl.context
@@ -206,6 +224,34 @@ const FX = (() => {
         const g = c.createRadialGradient(0, 0, 0, 0, 0, B * 0.34)
         g.addColorStop(0, '#fff'); g.addColorStop(0.35, '#ffd08a'); g.addColorStop(1, 'rgba(255,106,45,0)')
         c.fillStyle = g; c.beginPath(); c.arc(0, 0, B * 0.34, 0, TAU); c.fill()
+      })
+      const core = (c) => { // the same white-hot core for the other hulls
+        const g = c.createRadialGradient(0, 0, 0, 0, 0, B * 0.3)
+        g.addColorStop(0, '#fff'); g.addColorStop(0.35, '#ffd08a'); g.addColorStop(1, 'rgba(255,106,45,0)')
+        c.fillStyle = g; c.beginPath(); c.arc(0, 0, B * 0.3, 0, TAU); c.fill()
+      }
+      const hull = 2 * Math.ceil(B * 1.35 + PAD)
+      // carrier: a hub with three armed pylons, a launch pod at each tip
+      canvasTex(scene, 'boss1', hull, hull, c => {
+        const arm = (a) => [polar(B * 0.45, a - 0.42), polar(B * 1.18, a - 0.13), polar(B * 1.18, a + 0.13), polar(B * 0.45, a + 0.42)]
+        c.beginPath(); c.arc(0, 0, B * 0.66, 0, TAU); c.fillStyle = 'rgba(40,10,4,0.85)'; c.fill()
+        c.beginPath(); c.moveTo(B * 0.66, 0); c.arc(0, 0, B * 0.66, 0, TAU)
+        for (let i = 0; i < 3; i++) poly(c, arm(i * TAU / 3))
+        neon(c, COLORS.boss, 3.2, 0.12)
+        c.beginPath(); poly(c, ngon(3, B * 0.42, Math.PI / 3))
+        for (let i = 0; i < 3; i++) { const [x, y] = polar(B * 1.08, i * TAU / 3); c.moveTo(x + B * 0.14, y); c.arc(x, y, B * 0.14, 0, TAU) }
+        neon(c, mix(COLORS.boss, COLORS.accent, 0.4), 2.2, 0.1)
+        core(c)
+      })
+      // hive: a ring of six armored cells around a central one
+      canvasTex(scene, 'boss2', hull, hull, c => {
+        const cells = [[0, 0], ...ngon(6, B * 0.64, TAU / 12)]
+        c.beginPath(); for (const [x, y] of cells) poly(c, ngon(6, B * 0.4).map(([px, py]) => [x + px, y + py]))
+        c.fillStyle = 'rgba(40,10,4,0.85)'; c.fill()
+        neon(c, COLORS.boss, 2.8, 0.12)
+        c.beginPath(); for (const [x, y] of cells.slice(1)) poly(c, ngon(6, B * 0.17).map(([px, py]) => [x + px, y + py]))
+        neon(c, mix(COLORS.boss, COLORS.accent, 0.4), 2, 0.2)
+        core(c)
       })
 
       // power-up capsules: colored hex + white glyph

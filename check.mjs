@@ -1,5 +1,6 @@
 // NOVA RUSH end-to-end check: node check.mjs [--shots DIR] [--gpu]
-// Headless Chrome over CDP: title -> play (bot) -> bomb -> power-up -> dash / auto-fire / gamepad -> mothership -> upgrade -> warp -> pause -> game over -> restart.
+// Headless Chrome over CDP: title (hangar) -> play (bot) -> bomb -> power-up -> dash / auto-fire / gamepad -> mothership -> upgrade (swap)
+// -> warp -> sector twist -> pause -> game over -> restart -> daily challenge (ship stats, achievements).
 // Default renders in software (SwiftShader, the game's low-detail mode); --gpu uses the real GPU (full detail).
 // Zero dependencies (Node 24 built-ins + google-chrome). Exit 0 = PASS, 1 = FAIL.
 import { spawn } from 'node:child_process'
@@ -69,7 +70,7 @@ async function waitFor(expression, what, ms = 5000) {
   throw new Error('timed out waiting for ' + what)
 }
 
-const KEYS = { KeyW: 87, KeyA: 65, KeyS: 83, KeyD: 68, KeyP: 80, KeyT: 84, Space: 32, Digit1: 49, ShiftLeft: 16 }
+const KEYS = { KeyW: 87, KeyA: 65, KeyS: 83, KeyD: 68, KeyP: 80, KeyT: 84, KeyR: 82, Space: 32, Digit1: 49, ShiftLeft: 16 }
 const key = (code, type) => send('Input.dispatchKeyEvent', {
   type, code, key: code === 'Space' ? ' ' : code === 'ShiftLeft' ? 'Shift' : code.slice(-1).toLowerCase(), windowsVirtualKeyCode: KEYS[code], // KeyW -> w, Digit1 -> 1
 })
@@ -131,6 +132,15 @@ async function main() {
   await waitFor(`!!window.game?.scene?.isActive('title')`, 'title scene', 20000)
   await sleep(800)
   await shot('title')
+
+  // Hangar: right picks the next ship; a locked color is only previewed (the saved one stays); Esc closes it.
+  const hg = await js(`(() => { const t = game.scene.getScene('title'), h = t.hangar; h.open(); h.menu.act('right'); const ship = Settings.ship
+    h.menu.act('down'); h.menu.act('right'); return { ship, color: Settings.color, name: CONFIG.ships[ship].name } })()`)
+  await sleep(200)
+  await shot('hangar')
+  const hc = await js(`(() => { const t = game.scene.getScene('title'); t.hangar.menu.act('back'); const r = { open: t.hangar.layer.visible, menu: t.root.visible }
+    Settings.ship = 0; Settings.save(); FX.paintShip(t); return r })()`)
+  check(hg.ship === 1 && hg.color === 0 && !hc.open && hc.menu, `hangar: right picks ${hg.name}, a locked color is only previewed, Esc closes`)
   await click(800, 450)
   await waitFor(`game.scene.isActive('game') && ${G}.state === 'playing'`, 'game to start after click')
   check(true, 'title shown, click starts the game')
@@ -259,8 +269,15 @@ async function main() {
   check(true, 'armored hits bring the mothership down (sector clear)')
   await waitFor(`${G}.state === 'choosing' && game.scene.isActive('upgrade')`, 'the upgrade pick after the mothership', 6000)
   await waitFor(`game.scene.getScene('upgrade').ready`, 'the cards to take input (0.5 s guard)', 3000) // cards are in by then
+  const offer0 = await js(`game.scene.getScene('upgrade').cards.map((c) => c.u.id)`)
+  await tap('KeyR')
+  await waitFor(`${G}.swaps === 0`, 'R to swap the focused card', 2000)
+  await tap('KeyR') // the run's one swap is spent: a second R changes nothing
+  await sleep(500)
   await shot('upgrade')
   const offer = await js(`game.scene.getScene('upgrade').cards.map((c) => c.u.id)`)
+  check(offer[1] !== offer0[1] && offer[0] === offer0[0] && offer[2] === offer0[2] && new Set(offer).size === 3 &&
+    !(await js(`game.scene.getScene('upgrade').swapUi.visible`)), `swap: R swaps the focused card once (${offer0[1]} -> ${offer[1]}), SWAP buttons gone`)
   await tap('Digit1')
   await waitFor(`${G}.state === 'playing' && ${G}.upgrades.includes('${offer[0]}') && !game.scene.isActive('upgrade')`,
     `key 1 to pick ${offer[0]} and resume`, 3000)
@@ -271,6 +288,25 @@ async function main() {
   await sleep(1200)
   await shot('sector2')
   check(true, 'warped to sector 2')
+
+  // Sector twists: none before sector 3; from there a random one per sector (never the same twice running), on the HUD.
+  // NO POWER-UPS  ·  2X SCORE: nothing drops, a kill scores double. Sector 3's mothership is the next hull, with darters.
+  const tw = await js(`(() => { const g = ${G}, before = g.twist.i; g.endWarp()
+    const tag = !!game.scene.getScene('hud').twistTag, seq = [g.twist.i]
+    for (let k = 0; k < 30; k++) { g.twist = g.rollTwist(); seq.push(g.twist.i) }
+    while (g.twist.drops) g.twist = g.rollTwist()
+    const m = g.multiplier, s0 = g.score, e = Enemies.spawn(g, 'wanderer', 1500, 100, 0), drop = Pickups.drop(g, 800, 450, 'rapid', true)
+    g.killEnemy(e)
+    const b = Enemies.spawn(g, 'boss', 800, 200, 0), hull = [b.texture.key, b.escort]
+    Enemies.kill(g, b)
+    return { before, sector: g.sector, tag, seq, drop: !!drop, gained: g.score - s0, want: CONFIG.enemies.wanderer.points * m * 2,
+      n: CONFIG.sector.twists.length, hull } })()`)
+  check(tw.before === -1 && tw.sector === 3 && tw.tag && new Set(tw.seq).size === tw.n && tw.seq.every((i, k) => i >= 0 && (k === 0 || i !== tw.seq[k - 1])),
+    `sector twists: none in sector 2, sector 3 rolls one (tagged), never the same twice (${tw.seq.slice(0, 10).join(' ')} ...)`)
+  check(!tw.drop && tw.gained === tw.want, `NO POWER-UPS twist: nothing drops, a kill scores double (+${tw.gained})`)
+  check(tw.hull[0] === 'boss1' && tw.hull[1] === 'darter', `sector 3 mothership: hull ${tw.hull[0]}, launches ${tw.hull[1]}s`)
+  await sleep(600)
+  await shot('twist')
 
   // Pause freezes time and enemies; P resumes.
   const frozen = `(() => { const g = ${G}; return g.state + '|' + g.elapsed + '|' + g.enemies.map((e) => e.x + ',' + e.y).join(';') })()`
@@ -302,10 +338,29 @@ async function main() {
   await click(800, 450)
   await waitFor(`game.scene.isActive('game') && ${G}.state === 'playing'`, 'click to restart', 5000)
   const fresh = await js(`(() => { const g = ${G}; return { score: g.score, lives: g.lives, bombs: g.bombs, sector: g.sector, boss: !!g.boss,
-    pickups: g.pickups.length, enemies: g.enemies.length, over: game.scene.isActive('gameover'), okLives: CONFIG.player.lives, okBombs: CONFIG.player.bombs } })()`)
+    pickups: g.pickups.length, enemies: g.enemies.length, over: game.scene.isActive('gameover'), okLives: CONFIG.player.lives, okBombs: CONFIG.player.bombs,
+    twist: g.twist.i, swaps: g.swaps, daily: g.daily } })()`)
   check(fresh.score === 0 && fresh.lives === fresh.okLives && fresh.bombs === fresh.okBombs && fresh.enemies === 0 && !fresh.over &&
-    fresh.sector === 1 && !fresh.boss && fresh.pickups === 0,
+    fresh.sector === 1 && !fresh.boss && fresh.pickups === 0 && fresh.twist === -1 && fresh.swaps === 1 && fresh.daily === 0,
     `restart is a fresh run (score ${fresh.score}, lives ${fresh.lives}, bombs ${fresh.bombs}, sector ${fresh.sector}, enemies ${fresh.enemies})`)
+
+  // Daily challenge (BULWARK picked): seeded by today, its own best, and the ship's stats apply.
+  await js(`(() => { Settings.ship = 2; const g = ${G}; g.daily = 1; g.restartRun(); return true })()`)
+  await waitFor(`game.scene.isActive('game') && ${G}.state === 'playing' && ${G}.daily === Daily.today()`, 'a daily run to start', 5000)
+  const dy = await js(`(() => { const g = ${G}, a = g.stream(1), b = seeded(Daily.today() * 1000 + 1), same = [0, 0, 0].every(() => a() === b())
+    const best = Store.get('best', 0); g.score = 7; g.saveBest()
+    return { day: g.daily === Daily.today(), seeded: g.rng.spawn !== Math.random && same, apart: Daily.best(g.daily) === 7 && Store.get('best', 0) === best,
+      lives: g.lives, okLives: CONFIG.player.lives + 2, speed: g.mods.speed, label: game.scene.getScene('hud').bestText.x > 100 } })()`)
+  check(dy.day && dy.seeded && dy.apart && dy.label, 'daily challenge: seeded by today (same for everyone), its best kept apart')
+  check(dy.lives === dy.okLives && Math.abs(dy.speed - 0.8) < 1e-9, `BULWARK: ${dy.lives} lives, speed x${dy.speed}`)
+  await sleep(500)
+  await shot('daily')
+
+  // Achievements: unlocking a color toasts once and is remembered; a locked color can't be flown.
+  const ul = await js(`(() => { const g = ${G}, toasts = []; g.events.on('toast', (id) => toasts.push(id)); g.unlock('sector5'); g.unlock('sector5')
+    Settings.color = 3; const locked = Ship.colorIndex; Settings.color = 1; const open = Ship.colorIndex; Settings.color = 0; Settings.ship = 0
+    return { toasts, saved: Store.get('unlocked', []).includes('sector5'), locked, open } })()`)
+  check(ul.toasts.join() === 'unlock1' && ul.saved && ul.locked === 0 && ul.open === 1, 'achievement: EMBER unlocked once (toast), remembered; locked GOLD flies as CYAN')
 
   const music = await js(`({ error: Music.error, mood: Music.mood, notes: Object.values(Music.count).reduce((a, b) => a + b, 0), late: Music.late })`)
   check(music.error === null && music.notes > 0, `soundtrack ran without errors (${music.notes} notes, mood ${music.mood}, late steps ${music.late})`)

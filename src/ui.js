@@ -52,6 +52,7 @@ const uiTip = (s) => [s, 24, '#e6fdff', { glow: UI_CYAN, blur: 12, spacing: 4 }]
 const UI_TEXT = {
   score: ['SCORE', 13, '#5fb8d6', { blur: 0, spacing: 5, originX: 0 }],
   best: ['BEST', 15, uiHex(COLORS.accent), { blur: 0, spacing: 2, originX: 0 }],
+  dailyBest: ['DAILY BEST', 15, uiHex(COLORS.accent), { blur: 0, spacing: 2, originX: 0 }],
   mothership: ['MOTHERSHIP', 14, uiHex(COLORS.boss), { blur: 8, spacing: 6 }],
   muted: ['MUTED', 14, '#6f93bd', { blur: 0, spacing: 4, originX: 1 }],
   fps: ['FPS', 12, '#6f93bd', { blur: 0, spacing: 3, originX: 1 }],
@@ -76,6 +77,10 @@ const UI_TEXT = {
   resume: uiItem('RESUME'), restart: uiItem('RESTART'), settings: uiItem('SETTINGS'), quit: uiItem('QUIT TO TITLE'),
   upgrades: uiCap('UPGRADES'), pauseKeys: uiHint('P / ESC  RESUME'), pausePad: uiHint('START / B  RESUME'),
   setTitle: ['SETTINGS', 44, '#e6fdff', { glow: UI_CYAN, blur: 18, spacing: 14, weight: '900' }],
+  daily: uiItem('DAILY CHALLENGE'), hangar: uiItem('HANGAR'),
+  hangarTitle: ['HANGAR', 44, '#e6fdff', { glow: UI_CYAN, blur: 18, spacing: 14, weight: '900' }],
+  shipRow: uiRow('SHIP'), colorRow: uiRow('COLOR'),
+  hangarKeys: uiHint('ARROWS  CHOOSE + CHANGE    ESC  BACK'), hangarPad: uiHint('D-PAD  CHOOSE + CHANGE    B  BACK'),
   music: uiRow('MUSIC'), sfx: uiRow('SOUND EFFECTS'), shake: uiRow('SCREEN SHAKE'), flash: uiRow('FLASHES'),
   autofire: uiRow('AUTO-FIRE'), fpsRow: uiRow('FPS COUNTER'), fullscreen: uiRow('FULLSCREEN'), back: uiItem('BACK'),
   on: ['ON', 15, '#e6fdff', { glow: UI_CYAN, blur: 8, spacing: 3, weight: '900', originX: 1 }],
@@ -85,6 +90,7 @@ const UI_TEXT = {
   gameover: ['GAME OVER', 120, '#ffe6f2', { glow: uiHex(COLORS.splitter), blur: 30, spacing: 8, weight: '900', stroke: 4 }],
   goScore: ['SCORE', 16, '#8fb4d9', { blur: 0, spacing: 8 }],
   goBest: ['BEST', 26, uiHex(COLORS.accent), { blur: 10, spacing: 4, originX: 1 }],
+  goDailyBest: ['DAILY BEST', 26, uiHex(COLORS.accent), { blur: 10, spacing: 4, originX: 1 }],
   newBest: ['NEW BEST!', 60, '#fff6d0', { glow: uiHex(COLORS.accent), blur: 26, spacing: 6, weight: '900' }],
   goRun: uiCap('THIS RUN', 14), goTop: uiCap('TOP RUNS', 14),
   goTime: uiCap('TIME'), goKills: uiCap('KILLS'), goSector: uiCap('SECTOR'),
@@ -99,6 +105,15 @@ const UI_STREAK = [['RAMPAGE', COLORS.rapid], ['UNSTOPPABLE', COLORS.spread], ['
 UI_STREAK.forEach(([name, color], i) => {
   UI_TEXT['streak' + i] = [name, 56, '#ffffff', { glow: uiHex(color), blur: 24, spacing: 10, weight: '900' }]
   UI_TEXT['streakSub' + i] = [`${CONFIG.score.callout * 2 ** i} KILL STREAK`, 22, '#cfe6ff', { blur: 0, spacing: 8 }]
+})
+// Sector twists: a banner as the sector starts, then a tag under the sector name.
+CONFIG.sector.twists.forEach(({ name }, i) => {
+  UI_TEXT['twist' + i] = [name, 44, '#ffffff', { glow: uiHex(COLORS.warning), blur: 24, spacing: 8, weight: '900' }]
+  UI_TEXT['twistTag' + i] = [name, 13, uiHex(COLORS.warning), { blur: 6, spacing: 4 }]
+})
+// Achievement toasts: a ship color unlocked.
+CONFIG.colors.forEach(({ name, color }, i) => {
+  UI_TEXT['unlock' + i] = [`${name} SHIP COLOR UNLOCKED`, 16, '#ffffff', { glow: uiHex(color), blur: 10, spacing: 5, weight: '900', originX: 1 }]
 })
 const uiText = (scene, x, y, id) => uiLabel(scene, x, y, ...UI_TEXT[id])
 const uiSectorText = (scene, n) => uiLabel(scene, 0, 0, 'SECTOR ' + n, 60, '#ffffff', { glow: UI_CYAN, blur: 24, spacing: 10, weight: '900' })
@@ -170,8 +185,11 @@ function uiShowShip(scene, x, y, scale) {
   const ship = scene.add.image(x, y, 'player').setScale(scale).setRotation(-Math.PI / 2)
   const flames = [-1, 1].map(side => scene.add.image(0, 0, 'flame').setOrigin(1, 0.5).setRotation(-Math.PI / 2).setBlendMode(Phaser.BlendModes.ADD))
   const k = scale * 2 // texture pixels are half-size ship units
-  ship.flicker = () => flames.forEach((f, i) => f.setPosition(ship.x + (i ? 7 : -7) * k, ship.y + 27.5 * k)
-    .setScale(scale * Phaser.Math.FloatBetween(0.75, 0.95), scale).setAlpha(0.8 + 0.2 * Math.random()))
+  ship.flicker = () => {
+    const [sl, sw] = Ship.kind.shape || [1, 1] // the hangar's pick stretches the art: the nozzles move with it
+    flames.forEach((f, i) => f.setPosition(ship.x + (i ? 7 : -7) * k * sw, ship.y + 27.5 * k * sl)
+      .setScale(scale * Phaser.Math.FloatBetween(0.75, 0.95), scale).setAlpha(0.8 + 0.2 * Math.random()))
+  }
   return ship
 }
 
@@ -237,15 +255,8 @@ class UiMenu {
 // saved. Every row is a 0..n slider: left / right step it, Enter or a click cycles it, a click on a bar sets it.
 // under: the menu to hide meanwhile. sync() (every frame while open) also shows F / fullscreen changes made elsewhere.
 function uiSettings(scene, under) {
-  const { w, h } = CONFIG.arena, cx = w / 2, top = 150
-  const layer = scene.add.container(0, 0).setDepth(20).setVisible(false)
-  layer.add([
-    scene.add.rectangle(cx, h / 2, w, h, COLORS.bg, 0.7),
-    scene.add.graphics().fillStyle(0x060a16, 0.94).fillRoundedRect(cx - 370, top, 740, 630, 20)
-      .lineStyle(8, COLORS.player, 0.08).strokeRoundedRect(cx - 370, top, 740, 630, 20)
-      .lineStyle(2, COLORS.player, 0.55).strokeRoundedRect(cx - 370, top, 740, 630, 20),
-    uiText(scene, cx, top + 62, 'setTitle'),
-  ])
+  const { w } = CONFIG.arena, cx = w / 2, top = 150
+  const layer = uiPanel(scene, 'setTitle')
   const vol = (k) => ({ n: 10, get: () => Math.round(Settings[k] * 10), set: (v) => { Settings[k] = v / 10 } })
   const flag = (k) => ({ n: 1, get: () => +!!Settings[k], set: (v) => { Settings[k] = !!v } })
   // browsers allow fullscreen only right after a key press or click: a pad button alone can't
@@ -306,6 +317,69 @@ function uiSettings(scene, under) {
   return ui
 }
 
+// Overlay panel (settings, hangar): dimmed screen, a framed box and its title, in a hidden layer.
+function uiPanel(scene, titleId) {
+  const { w, h } = CONFIG.arena, cx = w / 2, top = 150
+  return scene.add.container(0, 0).setDepth(20).setVisible(false).add([
+    scene.add.rectangle(cx, h / 2, w, h, COLORS.bg, 0.7),
+    scene.add.graphics().fillStyle(0x060a16, 0.94).fillRoundedRect(cx - 370, top, 740, 630, 20)
+      .lineStyle(8, COLORS.player, 0.08).strokeRoundedRect(cx - 370, top, 740, 630, 20)
+      .lineStyle(2, COLORS.player, 0.55).strokeRoundedRect(cx - 370, top, 740, 630, 20),
+    uiText(scene, cx, top + 62, titleId),
+  ])
+}
+
+// Hangar overlay (title screen): the ship and its color, saved as they change. A locked color can be looked at, with
+// what unlocks it, but not flown. The ship art follows what is shown (FX.paintShip). under: the menu to hide meanwhile.
+function uiHangar(scene, under) {
+  const { w } = CONFIG.arena, cx = w / 2, top = 150, X0 = cx - 320
+  const layer = uiPanel(scene, 'hangarTitle')
+  layer.add(scene.add.image(cx, top + 175, 'player').setRotation(-Math.PI / 2))
+  const shown = {} // option index on show, per row
+  const rows = [
+    ['ship', 'shipRow', CONFIG.ships.map(s => [s.name, s.desc, '#8fb4d9'])],
+    ['color', 'colorRow', CONFIG.colors.map(c => Unlocks.has(c.unlock) ? [c.name, 'UNLOCKED', '#8fb4d9']
+      : [c.name, 'LOCKED  ·  ' + c.goal, uiHex(COLORS.warning)])],
+  ]
+  const picks = rows.map(([k, cap, opts], i) => {
+    const y = top + 300 + i * 115, parts = [uiText(scene, X0 + 18, y, cap)]
+    const vals = opts.map(([name, sub, color]) => [
+      uiLabel(scene, cx + 130, y, `‹     ${name}     ›`, 26, '#e6fdff', { blur: 0, spacing: 6, weight: '900' }),
+      uiLabel(scene, cx, y + 44, sub, 14, color, { blur: 0, spacing: 3, align: 'center', lineSpacing: 6 })])
+    parts.push(...vals.flat())
+    layer.add(parts)
+    const step = (d) => { shown[k] = (shown[k] + d + opts.length) % opts.length; show() }
+    return { x: cx, y: y + 22, w: 680, h: 100, parts, vals, k, pick: () => step(1),
+      adjust: (d) => { step(d); SFX.play('uiMove') },
+      click: (p) => { SFX.play('uiSelect'); step(p.x < cx + 130 ? -1 : 1) } }
+  })
+  const back = uiText(scene, cx, top + 553, 'back')
+  const hints = [uiText(scene, cx, top + 603, 'hangarKeys'), uiText(scene, cx, top + 603, 'hangarPad')]
+  layer.add([back, ...hints])
+  function show() {
+    for (const it of picks) it.vals.forEach((pair, n) => pair.forEach(o => o.setVisible(n === shown[it.k])))
+    const color = CONFIG.colors[shown.color]
+    Settings.ship = shown.ship
+    if (Unlocks.has(color.unlock)) Settings.color = shown.color
+    Settings.save()
+    FX.paintShip(scene, CONFIG.ships[shown.ship], color.color)
+  }
+  const ui = {
+    layer,
+    open() {
+      Object.assign(shown, { ship: CONFIG.ships[Settings.ship] ? Settings.ship : 0, color: Ship.colorIndex })
+      show()
+      under.setVisible(false)
+      layer.setVisible(true)
+      ui.menu.focus(0, true)
+    },
+    close() { layer.setVisible(false); under.setVisible(true); FX.paintShip(scene) }, // a locked color stays a preview
+    sync: () => uiShowFor(hints),
+  }
+  ui.menu = new UiMenu(scene, layer, [...picks, { x: cx, y: top + 553, w: 220, h: 50, parts: [back], pick: ui.close }], ui.close)
+  return ui
+}
+
 // Owned upgrades as a row of icons, a count after stacked ones. align: 1 = the row ends at x, 0.5 = centered on x.
 function uiUpgradeIcons(scene, owned, x, y, align, scale) {
   const n = {}, out = []
@@ -326,13 +400,13 @@ function uiUpgradeIcons(scene, owned, x, y, align, scale) {
   return out
 }
 
-// A finished (or abandoned) run goes into the local top 5 and the lifetime totals.
+// A finished (or abandoned) run goes into the local top 5 (not a daily one: that has its own best) and the lifetime totals.
 // Returns the table and this run's place in it (-1: didn't make it).
 function uiRecordRun(d) {
   const run = { score: d.score, sector: d.sector, time: Math.floor(d.elapsed), date: Date.now() }
   const old = Store.get('runs', []), life = Store.get('lifetime', {}) || {}
-  const runs = (Array.isArray(old) ? old : []).concat(run).sort((a, b) => b.score - a.score).slice(0, 5)
-  Store.set('runs', runs)
+  let runs = Array.isArray(old) ? old : []
+  if (!d.daily) Store.set('runs', runs = runs.concat(run).sort((a, b) => b.score - a.score).slice(0, 5))
   Store.set('lifetime', { runs: (life.runs || 0) + 1, kills: (life.kills || 0) + d.kills, time: (life.time || 0) + d.elapsed,
     bosses: (life.bosses || 0) + (d.bosses || 0), bestSector: Math.max(life.bestSector || 0, d.sector) })
   return { runs, rank: runs.indexOf(run) }
@@ -390,20 +464,25 @@ class TitleScene extends Phaser.Scene {
     this.ship = uiShowShip(this, cx, 330, 0.5)
     this.tweens.add({ targets: this.ship, y: 322, duration: 1300, yoyo: true, repeat: -1, ease: 'Sine.InOut' })
 
-    // Menu: PLAY (focused) and SETTINGS; the settings panel hides it while open.
+    // Menu: PLAY (focused), DAILY CHALLENGE (today's best beside it), HANGAR and SETTINGS; an open panel hides it.
     this.root = this.add.container(0, 0)
-    const play = uiLabel(this, cx, 450, 'PLAY', 48, '#e6fdff', { glow: UI_CYAN, blur: 20, spacing: 16, weight: '900' })
-    const set = uiText(this, cx, 524, 'settings')
-    this.root.add([play, set])
+    const play = uiLabel(this, cx, 440, 'PLAY', 48, '#e6fdff', { glow: UI_CYAN, blur: 20, spacing: 16, weight: '900' })
+    const daily = uiText(this, cx, 508, 'daily'), hangar = uiText(this, cx, 556, 'hangar'), set = uiText(this, cx, 604, 'settings')
+    this.root.add([play, daily, hangar, set])
+    const today = Daily.best(Daily.today())
+    if (today) this.root.add(uiLabel(this, cx + 262, 508, 'TODAY  ' + uiFmt(today), 13, uiHex(COLORS.accent), { blur: 0, spacing: 3, originX: 0 }))
     this.menu = new UiMenu(this, this.root, [
-      { x: cx, y: 450, w: 330, h: 78, parts: [play], pick: () => this.play() },
-      { x: cx, y: 524, w: 290, h: 52, parts: [set], pick: () => this.settings.open() },
+      { x: cx, y: 440, w: 330, h: 78, parts: [play], pick: () => this.play(false) },
+      { x: cx, y: 508, w: 500, h: 48, parts: [daily], pick: () => this.play(true) },
+      { x: cx, y: 556, w: 290, h: 48, parts: [hangar], pick: () => this.hangar.open() },
+      { x: cx, y: 604, w: 290, h: 48, parts: [set], pick: () => this.settings.open() },
     ])
     this.settings = uiSettings(this, this.root)
+    this.hangar = uiHangar(this, this.root)
 
     // Controls as key chips in one centered row (a caption under each); a gamepad in use gets its own row.
     const chipRow = (controls) => {
-      const y = 604, row = this.add.container(0, 0), box = this.add.graphics().lineStyle(2, COLORS.player, 0.55).fillStyle(COLORS.player, 0.07)
+      const y = 676, row = this.add.container(0, 0), box = this.add.graphics().lineStyle(2, COLORS.player, 0.55).fillStyle(COLORS.player, 0.07)
       row.add(box)
       const chips = controls.map(([key, cap]) => {
         const k = uiLabel(this, 0, y, key, 17, '#e8f7ff', { blur: 0 }), c = uiLabel(this, 0, y + 44, cap, 13, '#6f93bd', { blur: 0, spacing: 4 })
@@ -425,17 +504,17 @@ class TitleScene extends Phaser.Scene {
       chipRow([['LEFT STICK', 'MOVE'], ['RIGHT STICK', 'AIM + FIRE'], ['LB / LT / A', 'DASH'], ['RB / B', 'BOMB'], ['START', 'PAUSE']]),
       chipRow([['LEFT THUMB', 'MOVE'], ['RIGHT THUMB', 'AIM + FIRE'], ['DASH', 'DASH'], ['BOMB', 'BOMB'], ['II', 'PAUSE']]),
     ]
-    this.padHint = [uiLabel(this, cx, 694, 'GAMEPAD SUPPORTED', 13, '#6f93bd', { blur: 0, spacing: 5 }),
-      uiLabel(this, cx, 694, 'GAMEPAD CONNECTED', 13, '#e6fdff', { glow: UI_CYAN, blur: 8, spacing: 5 })]
+    this.padHint = [uiLabel(this, cx, 756, 'GAMEPAD SUPPORTED', 13, '#6f93bd', { blur: 0, spacing: 5 }),
+      uiLabel(this, cx, 756, 'GAMEPAD CONNECTED', 13, '#e6fdff', { glow: UI_CYAN, blur: 8, spacing: 5 })]
 
     // Best score, then lifetime totals as caption + number pairs in one centered row.
-    uiLabel(this, cx - 12, 748, 'BEST', 28, uiHex(COLORS.accent), { blur: 12, originX: 1 })
-    uiNum(this, cx + 8, 748, 'numY', 28).setText(uiFmt(Store.get('best', 0)))
+    uiLabel(this, cx - 12, 796, 'BEST', 28, uiHex(COLORS.accent), { blur: 12, originX: 1 })
+    uiNum(this, cx + 8, 796, 'numY', 28).setText(uiFmt(Store.get('best', 0)))
     const life = Store.get('lifetime', {}) || {}
     if (life.runs) {
       const pairs = [['RUNS', uiFmt(life.runs)], ['KILLS', uiFmt(life.kills || 0)], ['MOTHERSHIPS', uiFmt(life.bosses || 0)],
         ['BEST SECTOR', String(life.bestSector || 1)], ['TIME PLAYED', uiTime(life.time || 0)]]
-        .map(([cap, v]) => [uiLabel(this, 0, 792, cap, 12, '#6f93bd', { blur: 0, spacing: 4, originX: 0 }), uiNum(this, 0, 792, 'numW', 19).setText(v)])
+        .map(([cap, v]) => [uiLabel(this, 0, 834, cap, 12, '#6f93bd', { blur: 0, spacing: 4, originX: 0 }), uiNum(this, 0, 834, 'numW', 19).setText(v)])
       const wide = ([c, n]) => c.width - 8 + 10 + n.width
       let x = cx - (pairs.reduce((s, p) => s + wide(p), 0) + 40 * (pairs.length - 1)) / 2
       for (const p of pairs) {
@@ -446,7 +525,7 @@ class TitleScene extends Phaser.Scene {
     }
 
     if (CONFIG.low) {
-      uiLabel(this, cx, 846, 'Graphics acceleration is off in this browser, so the game runs in low-detail mode. Turn it on in the browser settings for smooth play.',
+      uiLabel(this, cx, 870, 'Graphics acceleration is off in this browser, so the game runs in low-detail mode. Turn it on in the browser settings for smooth play.',
         15, uiHex(COLORS.warning), { blur: 0 })
     }
     const mute = (on) => uiLabel(this, w - 28, h - 26, on ? 'SOUND ON  [M]' : 'SOUND OFF  [M]', 14, '#6f93bd', { blur: 0, spacing: 3, originX: 1 })
@@ -464,14 +543,14 @@ class TitleScene extends Phaser.Scene {
     }
   }
 
-  activeMenu() { return this.settings.layer.visible ? this.settings.menu : this.menu }
+  activeMenu() { return this.settings.layer.visible ? this.settings.menu : this.hangar.layer.visible ? this.hangar.menu : this.menu }
 
-  play() {
+  play(daily) {
     if (this.leaving) return
     this.leaving = true
     if (Pad.touch && !this.scale.isFullscreen) this.scale.startFullscreen() // phones: the whole screen (main.js turns it sideways)
     while (this.jobs.length) this.jobs.shift()() // whatever isn't painted yet: now, not mid-game
-    this.scene.start('game')
+    this.scene.start('game', { daily })
   }
 
   update(time, delta) {
@@ -491,9 +570,10 @@ class TitleScene extends Phaser.Scene {
     this.padHint[0].setVisible(!Pad.connected)
     this.padHint[1].setVisible(Pad.connected)
 
-    const set = this.settings.layer.visible
+    const set = this.settings.layer.visible, hangar = this.hangar.layer.visible
     if (set) this.settings.sync()
-    if (!set && Pad.hit('start')) this.play()
+    if (hangar) this.hangar.sync()
+    if (!set && !hangar && Pad.hit('start')) this.play(false)
     else this.activeMenu().pad()
   }
 }
@@ -523,18 +603,18 @@ class HudScene extends Phaser.Scene {
     this.multText = uiNum(this, 0, 60, 'numY', 32)
     this.add.rectangle(32, 90, 220, 3, 0xffffff, 0.12).setOrigin(0, 0.5)
     this.streakBar = this.add.rectangle(32, 90, 220, 3, COLORS.accent).setOrigin(0, 0.5)
-    uiText(this, 32, 110, 'best').setAlpha(0.75)
-    this.bestText = uiNum(this, 84, 110, 'numY', 15).setAlpha(0.75)
+    const best = uiText(this, 32, 110, g.daily ? 'dailyBest' : 'best').setAlpha(0.75)
+    this.bestText = uiNum(this, 32 + best.width - 2 * best.pad + 10, 110, 'numY', 15).setAlpha(0.75)
 
-    // Top-center: time survived, time left until the mothership, sector, mothership health.
+    // Top-center: time survived, time left until the mothership, sector (and its twist), mothership health.
     this.timeText = uiNum(this, w / 2, 40, 'numW', 28, 0.5)
     this.toBossFill = this.add.rectangle(-85, 0, 170, 4, COLORS.boss).setOrigin(0, 0.5)
-    this.toBoss = this.add.container(w / 2, 59, [this.add.rectangle(0, 0, 170, 4, 0xffffff, 0.14), this.toBossFill,
-      this.add.image(100, 0, 'boss').setScale(0.11)])
-    this.sectorName = null
+    this.toBossIcon = this.add.image(100, 0, 'boss').setScale(0.11)
+    this.toBoss = this.add.container(w / 2, 59, [this.add.rectangle(0, 0, 170, 4, 0xffffff, 0.14), this.toBossFill, this.toBossIcon])
+    this.sectorName = this.twistTag = null
     this.showSector(g.sector)
     this.bossFill = this.add.rectangle(-210, 22, 420, 8, COLORS.boss).setOrigin(0, 0.5)
-    this.bossUi = this.add.container(w / 2, 104, [
+    this.bossUi = this.add.container(w / 2, 118, [
       uiText(this, 0, 0, 'mothership'),
       this.add.rectangle(0, 22, 420, 8, 0xffffff, 0.12),
       this.bossFill,
@@ -648,7 +728,7 @@ class HudScene extends Phaser.Scene {
   // Restart / quit from the pause menu: the run so far still counts toward the records.
   leave(method) {
     const g = this.g
-    if (g.score > 0) uiRecordRun({ score: g.score, sector: g.sector, elapsed: g.elapsed, kills: g.kills, bosses: g.stats.bosses })
+    if (g.score > 0) uiRecordRun({ score: g.score, sector: g.sector, elapsed: g.elapsed, kills: g.kills, bosses: g.stats.bosses, daily: g.daily > 0 })
     g[method]()
   }
 
@@ -726,9 +806,14 @@ class HudScene extends Phaser.Scene {
     icons.more.setText(n > CONFIG.hud.maxIcons ? '+' + (n - CONFIG.hud.maxIcons) : '')
   }
 
+  // The sector's name and its twist (if any) under the timer; the mothership icon is the hull on its way.
   showSector(n) {
+    const cx = CONFIG.arena.w / 2, i = this.g.twist.i
     if (this.sectorName) this.sectorName.destroy()
-    this.sectorName = uiSectorName(this, CONFIG.arena.w / 2, 76, n)
+    if (this.twistTag) this.twistTag.destroy()
+    this.sectorName = uiSectorName(this, cx, 76, n)
+    this.twistTag = i >= 0 ? uiText(this, cx, 96, 'twistTag' + i) : null
+    this.toBossIcon.setTexture(Enemies.design(n).tex)
   }
 
   popMultiplier() {
@@ -844,7 +929,12 @@ class HudScene extends Phaser.Scene {
   onExtraLife() { this.banner(uiText(this, 0, 0, 'life'), COLORS.accent, 330) }
   onBoss() { this.banner(uiText(this, 0, 0, 'boss'), COLORS.boss, 220); this.edgePulse(COLORS.boss) }
   onBossDown() { this.banner(uiText(this, 0, 0, 'clear'), COLORS.accent, 250) }
-  onSector(n) { this.banner(uiSectorText(this, n), COLORS.player, 250, uiSectorSub(this, n)); this.showSector(n) }
+  onSector(n) {
+    const i = this.g.twist.i
+    this.banner(uiSectorText(this, n), COLORS.player, 250, uiSectorSub(this, n))
+    if (i >= 0) this.banner(uiText(this, 0, 0, 'twist' + i), COLORS.warning, 430)
+    this.showSector(n)
+  }
 
   onPowerup(type) {
     const t = uiText(this, CONFIG.arena.w / 2, CONFIG.arena.h - 170, type).setAlpha(0)
@@ -894,7 +984,7 @@ class GameOverScene extends Phaser.Scene {
       onComplete: () => data.newBest && this.newBest(cx, 350),
     })
     if (!data.newBest) {
-      uiText(this, cx - 8, 348, 'goBest')
+      uiText(this, cx - 8, 348, data.daily ? 'goDailyBest' : 'goBest')
       uiNum(this, cx + 8, 348, 'numY', 26).setText(uiFmt(data.best))
     }
 

@@ -84,6 +84,9 @@ const CONFIG = {
             launchEvery: 3.5, launchCount: 3,          // spinners launched from its bays
             chargeEvery: 7, chargeWindup: 0.8, chargeTime: 0.7, chargeSpeed: 560,
             bombDamage: 0.2, drops: 3,                 // a bomb takes 20% of its max hp
+            // a new hull every designEvery sectors (then round again), each launching its own escort kind
+            designEvery: 2,
+            designs: [{ tex: 'boss', escort: 'spinner' }, { tex: 'boss1', escort: 'darter' }, { tex: 'boss2', escort: 'chaser' }],
             // bullet attacks from sector 2 (which ones: Enemies ATTACKS): s apart, s its core flashes first;
             // sector 5+ uses them all, `fury` x as far apart, with a third more bullets
             attackEvery: 4.5, attackWindup: 0.8, fury: 0.7,
@@ -96,6 +99,15 @@ const CONFIG = {
     duration: 60,         // s of play before the mothership arrives
     clearDelay: 1.4,      // s between the mothership exploding and the warp
     warp: 2.4,            // s the warp to the next sector takes
+    // From sector twistFrom on, each sector gets one twist at random (never the same one twice running).
+    // Fields left out stay normal: swarms = swarm rate x, kind = the only kind that spawns (and no swarms),
+    // pace = spawn interval x, drops = power-ups drop, score = points x.
+    twistFrom: 3,
+    twists: [
+      { name: 'DOUBLE SWARMS', swarms: 2 },
+      { name: 'BRUTES ONLY', kind: 'brute', pace: 3 },
+      { name: 'NO POWER-UPS  ·  2X SCORE', drops: false, score: 2 },
+    ],
   },
 
   pickups: {
@@ -126,6 +138,25 @@ const CONFIG = {
   },
 
   hud: { maxIcons: 6 },   // life/bomb icons shown before a "+N" counter
+
+  // Hangar (title screen). A ship's mods multiply GameScene.mods, lives adds to player.lives, spread = the x6 spread
+  // gun from the start; shape stretches its art [length, width], guns adds a second cannon pair.
+  ships: [
+    { name: 'NOVA', desc: 'BALANCED ALL-ROUNDER' },
+    { name: 'DART', desc: 'FAST AND FRAGILE\n+25% SPEED, QUICKER DASH, ONE LIFE LESS',
+      lives: -1, mods: { speed: 1.25, dashCooldown: 0.7 }, shape: [1.12, 0.8] },
+    { name: 'BULWARK', desc: 'SLOW AND ARMORED\nTWO MORE LIVES, -20% SPEED',
+      lives: 2, mods: { speed: 0.8 }, shape: [0.94, 1.2] },
+    { name: 'HYDRA', desc: 'SPREAD GUN FROM THE START\n-40% FIRE RATE',
+      spread: true, mods: { fireRate: 0.6 }, guns: true },
+  ],
+  // Ship colors: the first is free, each other one unlocks with an achievement (GameScene.unlock).
+  colors: [
+    { name: 'CYAN', color: 0x00e5ff },
+    { name: 'EMBER', color: 0xff6a2d, unlock: 'sector5', goal: 'CLEAR SECTOR 5' },
+    { name: 'VIOLET', color: 0xd94dff, unlock: 'nohit', goal: 'CLEAR A SECTOR WITHOUT TAKING A HIT' },
+    { name: 'GOLD', color: 0xffd23d, unlock: 'kills', goal: '1,000 LIFETIME KILLS' },
+  ],
 }
 
 const COLORS = {
@@ -166,6 +197,42 @@ const Store = {
 }
 
 // Player options (title / pause menus), remembered. Settings.save() after changing a field.
-const Settings = Object.assign({ music: 0.6, sfx: 0.8, shake: true, flash: true, autofire: false, fps: !!Store.get('fps', false) },
-  Store.get('settings', {}))
+const Settings = Object.assign({ music: 0.6, sfx: 0.8, shake: true, flash: true, autofire: false, fps: !!Store.get('fps', false),
+  ship: 0, color: 0 }, Store.get('settings', {}))
 Settings.save = () => Store.set('settings', Settings)
+
+// Achievements earned (the ids in CONFIG.colors[].unlock), remembered.
+const Unlocks = {
+  list: [].concat(Store.get('unlocked', [])),
+  has: (id) => !id || Unlocks.list.includes(id),
+  add(id) {
+    if (Unlocks.has(id)) return false
+    Unlocks.list.push(id)
+    Store.set('unlocked', Unlocks.list)
+    return true
+  },
+}
+
+// The hangar's pick; a color not unlocked (yet) flies as the first one.
+const Ship = {
+  get kind() { return CONFIG.ships[Settings.ship] || CONFIG.ships[0] },
+  get colorIndex() { const c = CONFIG.colors[Settings.color]; return c && Unlocks.has(c.unlock) ? Settings.color : 0 },
+  get color() { return CONFIG.colors[Ship.colorIndex].color },
+}
+
+// Daily challenge: one seed per UTC day, so everyone gets the same spawns, drops, twists and upgrade offers that day.
+// Its best score is kept apart from the all-time best.
+const Daily = {
+  today: () => Math.floor(Date.now() / 86400000),
+  best(day) { const d = Store.get('daily', null); return d && d.day === day ? d.best : 0 },
+}
+
+// Seeded random in [0, 1) (mulberry32): the same seed gives the same sequence.
+function seeded(seed) {
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}

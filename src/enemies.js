@@ -4,6 +4,7 @@
 // Armored kinds (brute, mothership) have hp / hpMax and flash (s of white hit-flash left; GameScene.hitEnemy sets it).
 // aux: the extra Image some kinds carry (darter aim line, gunner / mothership glow); it is destroyed with its enemy.
 // Enemy shots are pooled Images: scene.ebullets (live), scene.ebPool (spent, hidden, reused).
+// Spawn decisions draw from scene.rng.spawn (seeded in the daily challenge); the sector twist (scene.twist) bends them.
 
 const Enemies = (() => {
   const A = CONFIG.arena, S = CONFIG.spawn, E = CONFIG.enemies, BOSS = E.boss, EB = E.bullet
@@ -32,10 +33,11 @@ const Enemies = (() => {
   }
 
   function pickKind(scene) {
+    if (scene.twist.kind) return scene.twist.kind
     const open = (k) => scene.elapsed >= E[k].unlock && scene.sector >= (E[k].sector || 1)
     let total = 0
     for (const k in S.weights) if (open(k)) total += S.weights[k]
-    let roll = Math.random() * total
+    let roll = scene.rng.spawn() * total
     for (const k in S.weights) if (open(k) && (roll -= S.weights[k]) <= 0) return k
     return 'chaser'
   }
@@ -43,7 +45,7 @@ const Enemies = (() => {
   // A cluster of one kind at one spot on the border; members pop in one after another.
   function spawnGroup(scene, e) {
     const kind = pickKind(scene)
-    const n = Math.min(E[kind].group || 9, Math.floor(S.groupStart + (S.groupEnd - S.groupStart) * e + Math.random()))
+    const n = Math.min(E[kind].group || 9, Math.floor(S.groupStart + (S.groupEnd - S.groupStart) * e + scene.rng.spawn()))
     const [x, y] = edgePoint(scene, E[kind].radius + 50, S.minPlayerDist + 50 * Math.SQRT2) // +50: room for the scatter
     for (let i = 0; i < n; i++) Enemies.spawn(scene, kind, x + rand(-50, 50), y + rand(-50, 50), S.telegraph + i * 0.06)
   }
@@ -54,18 +56,18 @@ const Enemies = (() => {
     const p = scene.player, r = E.chaser.radius + 40
     const corners = [[r, r], [A.w - r, r], [r, A.h - r], [A.w - r, A.h - r]]
       .filter(([x, y]) => Math.hypot(x - p.x, y - p.y) >= S.minPlayerDist + 60)
-    const n = Math.round(Phaser.Math.Between(S.swarmMin, S.swarmMax) * (1 + S.sectorRate * past(scene)))
+    const n = Math.round((S.swarmMin + Math.floor(scene.rng.spawn() * (S.swarmMax - S.swarmMin + 1))) * (1 + S.sectorRate * past(scene)))
     for (let i = 0; i < n; i++) {
       const [x, y] = corners[i % corners.length]
       Enemies.spawn(scene, 'chaser', x + rand(-40, 40), y + rand(-40, 40), S.swarmTelegraph)
     }
   }
 
-  // Launch spinners from the mothership's bays, flung outward.
+  // Launch escorts (its design's kind) from the mothership's bays, flung outward.
   function launch(scene, e) {
     for (let k = 0; k < BOSS.launchCount; k++) {
       const a = e.rotation + k * TAU / BOSS.launchCount
-      const c = Enemies.spawn(scene, 'spinner', e.x + Math.cos(a) * e.radius, e.y + Math.sin(a) * e.radius, 0.25)
+      const c = Enemies.spawn(scene, e.escort, e.x + Math.cos(a) * e.radius, e.y + Math.sin(a) * e.radius, 0.25)
       if (c) { c.vx = Math.cos(a) * c.speed; c.vy = Math.sin(a) * c.speed }
     }
   }
@@ -180,6 +182,9 @@ const Enemies = (() => {
       e.flash = 0
       e.hue = HUES[s]
       e.setTint(e.hue)
+      const d = Enemies.design(scene.sector)
+      e.setTexture(d.tex)
+      e.escort = d.escort
       e.aux = scene.add.image(e.x, e.y, 'glow').setTint(COLORS.ebullet).setBlendMode(ADD).setDepth(11).setVisible(false)
       scene.boss = e
     },
@@ -304,7 +309,7 @@ const Enemies = (() => {
         e.aux.setVisible(false)
       }
     },
-    // Mothership: drifts after the player launching spinners; every few seconds it shudders, then lunges.
+    // Mothership: drifts after the player launching escorts; every few seconds it shudders, then lunges.
     // From sector 2 it also stops, its core flashes (the warning), then it fires its bullet attack.
     boss(e, p, bullets, dt, scene) {
       e.rotation += (e.mode === 'windup' ? 3 : e.mode === 'fire' ? 1.5 : 0.5) * dt
@@ -362,8 +367,11 @@ const Enemies = (() => {
     // The next sector's mothership may come once its timer runs out.
     nextSector(scene) { scene.director.bossSpawned = false },
 
+    // The mothership design guarding a sector: a new one every CONFIG.enemies.boss.designEvery sectors, then round again.
+    design: (sector) => BOSS.designs[Math.floor((sector - 1) / BOSS.designEvery) % BOSS.designs.length],
+
     update(scene, dt) {
-      const d = scene.director, t = scene.elapsed, calm = scene.warping > 0
+      const d = scene.director, t = scene.elapsed, calm = scene.warping > 0, tw = scene.twist
       if (!calm && !d.bossSpawned && t - scene.sectorStart >= CONFIG.sector.duration) {
         d.bossSpawned = true // it enters from the side farther from the player, clear of the HUD corners
         const x = scene.player.x < A.w / 2 ? A.w - BOSS.radius - 40 : BOSS.radius + 40
@@ -371,11 +379,11 @@ const Enemies = (() => {
         SFX.play('bossAlarm')
         scene.events.emit('boss')
       }
-      if (t >= d.nextSwarm) { if (!calm && !scene.boss) swarm(scene); d.nextSwarm += S.swarmEvery }
+      if (t >= d.nextSwarm) { if (!calm && !scene.boss && !tw.kind) swarm(scene); d.nextSwarm += S.swarmEvery / tw.swarms }
       if (t >= d.nextSpawn) {
         const e = ramp(t)
         if (!calm && d.nextSwarm - t > S.swarmLull) spawnGroup(scene, e)
-        const interval = (S.startInterval + (S.endInterval - S.startInterval) * e) * (scene.boss ? S.bossSlow : 1) / (1 + S.sectorRate * past(scene))
+        const interval = (S.startInterval + (S.endInterval - S.startInterval) * e) * (scene.boss ? S.bossSlow : 1) * tw.pace / (1 + S.sectorRate * past(scene))
         d.nextSpawn = t + interval * (1 + S.breatheAmp * Math.sin(t * TAU / S.breathePeriod))
       }
 
